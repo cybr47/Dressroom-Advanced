@@ -23,7 +23,8 @@ public final class ClockLabelLayoutProbe {
     }
 
     private static void layout(View view, int width) {
-        view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+        int mode = width == 0 ? View.MeasureSpec.UNSPECIFIED : View.MeasureSpec.EXACTLY;
+        view.measure(View.MeasureSpec.makeMeasureSpec(width, mode),
                 View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.AT_MOST));
         view.layout(0, 0, view.getMeasuredWidth(), view.getMeasuredHeight());
     }
@@ -76,27 +77,35 @@ public final class ClockLabelLayoutProbe {
         clock.addView(time, 120, 20);
 
         ClockLabelLayout sizing = new ClockLabelLayout();
-        layout(clock, 700);
-        sizing.apply(clock, 200, 50);
-        layout(clock, 700);
+        layout(clock, 0);
+        int stockWidth = clock.getWidth();
+        sizing.apply(clock, 200, 50, 1, 1, 700, 600);
+        layout(clock, 0);
+        check(clock.getWidth() > stockWidth && clock.getWidth() < 700, "The box grows into free space");
+        int expandedWidth = clock.getWidth();
         check(date.getTextSize() == 40 && degrees.getTextSize() == 10, "Independent scaling");
         check(icon.getLayoutParams().width == 8, "Weather icon follows weather text");
-        sizing.apply(clock, 50, 200);
-        layout(clock, 700);
+        sizing.apply(clock, 50, 200, 1, 1, 700, 600);
+        layout(clock, 0);
+        check(clock.getWidth() < expandedWidth, "The box shrinks with the date");
         check(date.getTextSize() == 10 && degrees.getTextSize() == 40, "Reverse drag");
         check(icon.getLayoutParams().width == 32, "Icon scales from stock dimensions");
 
         layout(clock, 490);
-        sizing.apply(clock, 200, 200);
-        layout(clock, 490);
+        sizing.apply(clock, 200, 200, 1, 1, 490, 600);
+        layout(clock, 0);
         float fitted = date.getTextSize();
         check(fitted > 20 && fitted < 40, "The longer date gets a width cap");
         check(date.getLayout().getLineWidth(0) <= date.getWidth(), "The date fits");
-        check(time.getLeft() >= weather.getRight() && time.getRight() <= 486, "Time keeps its slot");
-        sizing.apply(clock, 200, 200);
-        check(date.getTextSize() == fitted, "Repeated layout preserves the same fitted text size");
+        check(clock.getWidth() <= 490 && time.getWidth() == 120
+                && time.getLeft() >= weather.getRight(), "Time keeps its slot at the wall");
+        sizing.apply(clock, 200, 200, 1, 1, 490, 600);
+        check(Math.abs(date.getTextSize() - fitted) < .1f, "Repeated layout preserves the same fitted text size");
 
-        sizing.apply(clock, 100, 100);
+        sizing.apply(clock, 100, 100, 1, 2, 700, 600);
+        check(date.getTextSize() == 10 && degrees.getTextSize() == 10, "Independent clock zoom");
+
+        sizing.restore();
         check(date.getTextSize() == 20 && degrees.getTextSize() == 20, "Native text sizes restored");
         check(icon.getLayoutParams().width == 16, "Native icon size restored");
         System.out.println("Clock label layout: " + checks + " checks passed");

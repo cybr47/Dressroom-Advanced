@@ -181,6 +181,11 @@ final class RuntimeClockHooks {
                     module.report("Now Bar stack controls unavailable", error);
                 }
             }
+            try {
+                DateEffects.installProviderWidth(module, base);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+                module.report("Clock width binding unavailable", error);
+            }
             VariableFonts.install(module, base, view -> profiles.get(view));
             Class<?> font =
                     Class.forName(

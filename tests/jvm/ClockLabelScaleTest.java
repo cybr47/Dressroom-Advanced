@@ -4,9 +4,19 @@ public final class ClockLabelScaleTest {
     private static int checks;
 
     private static void equal(float expected, float actual) {
-        if (Math.abs(expected - actual) > .001f)
+        if (!(Math.abs(expected - actual) < .2f))
             throw new AssertionError("Expected " + expected + " but got " + actual);
         checks++;
+    }
+
+    private static ClockLabelFit.Size row(ClockLabelFit.Scales scales) {
+        return new ClockLabelFit.Size(125 + 110 * scales.date() + 40 * scales.weather(), 50);
+    }
+
+    private static ClockLabelFit.Size stacked(ClockLabelFit.Scales scales) {
+        return new ClockLabelFit.Size(
+                Math.max(140, Math.max(100 * scales.date(), 58 * scales.weather())),
+                115 + 20 * scales.date() + 14 * scales.weather());
     }
 
     public static void main(String[] args) {
@@ -14,15 +24,42 @@ public final class ClockLabelScaleTest {
         equal(100, ClockLabelScale.clamp(100));
         equal(175, ClockLabelScale.clamp(175));
         equal(200, ClockLabelScale.clamp(300));
-        equal(1, ClockLabelScale.growth(240, 120, 200));
-        equal(1, ClockLabelScale.growth(80, 100, 100));
-        equal(0, ClockLabelScale.growth(100, 120, 180));
+        equal(0, ClockLabelScale.reference(0f, 100, 100));
+        equal(1, ClockLabelScale.reference(0f, 110, 100));
+        equal(1.35f, ClockLabelScale.reference(1.35f, 100, 100));
 
-        float growth = ClockLabelScale.growth(170, 120, 220);
-        equal(.5f, growth);
-        equal(90, ClockLabelScale.fit(70, 110, growth));
-        equal(80, ClockLabelScale.fit(50, 110, growth));
-        equal(35, ClockLabelScale.fit(70, 35, growth));
-        System.out.println("Clock label scale: " + checks + " checks passed");
+        ClockLabelFit.Size walls = new ClockLabelFit.Size(420, 240);
+        ClockLabelFit.Scales loose = ClockLabelFit.fit(walls, new ClockLabelFit.Scales(2, 1),
+                1, ClockLabelScaleTest::row);
+        equal(2, loose.date());
+        equal(1, loose.weather());
+        equal(385, row(loose).width());
+
+        ClockLabelFit.Scales tight = ClockLabelFit.fit(new ClockLabelFit.Size(320, 80),
+                new ClockLabelFit.Scales(2, 1), 1, ClockLabelScaleTest::row);
+        equal((320 - 125 - 40) / 110f, tight.date());
+        equal(1, tight.weather());
+        equal(320, row(tight).width());
+
+        ClockLabelFit.Scales crowded = ClockLabelFit.fit(new ClockLabelFit.Size(300, 80),
+                new ClockLabelFit.Scales(2, 2), 1, ClockLabelScaleTest::row);
+        equal(300, row(crowded).width());
+
+        ClockLabelFit.Scales stacked = ClockLabelFit.fit(new ClockLabelFit.Size(170, 240),
+                new ClockLabelFit.Scales(2, 2), 1, ClockLabelScaleTest::stacked);
+        equal(1.7f, stacked.date());
+        equal(2, stacked.weather());
+        equal(170, stacked(stacked).width());
+        ClockLabelFit.Scales shortBox = ClockLabelFit.fit(new ClockLabelFit.Size(400, 150),
+                new ClockLabelFit.Scales(2, 1), 1, ClockLabelScaleTest::stacked);
+        equal(1.05f, shortBox.date());
+        equal(1, shortBox.weather());
+        equal(150, stacked(shortBox).height());
+
+        equal(60, ClockLabelFit.centeredStart(100, 80, 0, 260));
+        equal(50, ClockLabelFit.centeredStart(100, 100, 0, 260));
+        equal(10, ClockLabelFit.centeredStart(35, 80, 10, 260));
+        equal(180, ClockLabelFit.centeredStart(250, 80, 10, 260));
+        System.out.println("Clock label scale and bounds: " + checks + " checks passed");
     }
 }

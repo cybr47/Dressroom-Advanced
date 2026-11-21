@@ -341,10 +341,14 @@ final class EditorBinding {
         Reflect.call(repo, "setData", Reflect.call(repo, "getData"), true);
     }
 
+    Object positioner(Object owner) throws ReflectiveOperationException {
+        return Reflect.field(Reflect.field(owner, legacy ? "R" : "O"), "b");
+    }
+
     void position(Object owner, Object draft, boolean resize, float scale, int dx, int dy)
             throws ReflectiveOperationException {
         Object useCase = Reflect.field(owner, legacy ? "R" : "O");
-        Object position = Reflect.field(useCase, "b");
+        Object position = positioner(owner);
         Object screen = Reflect.call(Reflect.field(useCase, legacy ? "e" : "d"), "getData");
         Object device = Reflect.call(Reflect.field(useCase, legacy ? "h" : "e"), "getData");
         Object assist = Reflect.call(Reflect.field(useCase, legacy ? "c" : "j"), "getData");

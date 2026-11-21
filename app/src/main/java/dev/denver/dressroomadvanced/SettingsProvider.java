@@ -143,6 +143,10 @@ public final class SettingsProvider extends ContentProvider {
                 json.put("hideDate", extras.getBoolean("hideDate"));
                 for (String key : new String[] {ClockLabelScale.DATE, ClockLabelScale.WEATHER})
                     json.put(key, ClockLabelScale.clamp(extras.getInt(key, ClockLabelScale.DEFAULT)));
+                json.put(ClockLabelScale.REFERENCE,
+                        ClockLabelScale.reference(extras.getFloat(ClockLabelScale.REFERENCE),
+                                extras.getInt(ClockLabelScale.DATE, ClockLabelScale.DEFAULT),
+                                extras.getInt(ClockLabelScale.WEATHER, ClockLabelScale.DEFAULT)));
                 json.put("weatherEnabled", extras.getBoolean("weatherEnabled"));
                 json.put("forceBlur", extras.getBoolean("forceBlur"));
                 json.put("blurRadius", extras.getInt("blurRadius", 200));
@@ -259,6 +263,9 @@ public final class SettingsProvider extends ContentProvider {
             result.putBoolean("hideDate", json.optBoolean("hideDate"));
             for (String key : new String[] {ClockLabelScale.DATE, ClockLabelScale.WEATHER})
                 result.putInt(key, ClockLabelScale.clamp(json.optInt(key, ClockLabelScale.DEFAULT)));
+            result.putFloat(ClockLabelScale.REFERENCE,
+                    ClockLabelScale.reference((float) json.optDouble(ClockLabelScale.REFERENCE, 0),
+                            result.getInt(ClockLabelScale.DATE), result.getInt(ClockLabelScale.WEATHER)));
             if (json.has("weatherEnabled"))
                 result.putBoolean("weatherEnabled", json.getBoolean("weatherEnabled"));
             result.putBoolean("forceBlur", json.optBoolean("forceBlur"));

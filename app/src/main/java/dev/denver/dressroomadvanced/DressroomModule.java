@@ -963,6 +963,8 @@ public final class DressroomModule extends XposedModule {
                                                         new android.os.Bundle(draftSettings));
                                             android.os.Bundle effects =
                                                     draft != null ? draft : saved;
+                                            EditorClockBox.bind(
+                                                    this, editorBinding, chain.getThisObject(), clock, data);
                                             DateEffects.bindSettings(clock, effects);
                                             if (effects != null) {
                                                 float scale =

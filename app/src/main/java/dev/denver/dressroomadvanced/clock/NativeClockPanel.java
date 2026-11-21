@@ -76,6 +76,7 @@ final class NativeClockPanel {
     private boolean initialHideDate;
     private int dateSize = ClockLabelScale.DEFAULT, weatherSize = ClockLabelScale.DEFAULT;
     private int initialDateSize, initialWeatherSize;
+    private float labelReference, initialLabelReference;
     private Boolean weatherPreference;
     private boolean initialWeather;
     private boolean forceBlur;
@@ -253,6 +254,9 @@ final class NativeClockPanel {
                 initialWeatherSize = weatherSize = ClockLabelScale.clamp(saved == null
                         ? ClockLabelScale.DEFAULT
                         : saved.getInt(ClockLabelScale.WEATHER, ClockLabelScale.DEFAULT));
+                initialLabelReference = labelReference = ClockLabelScale.reference(
+                        saved == null ? 0f : saved.getFloat(ClockLabelScale.REFERENCE),
+                        dateSize, weatherSize);
                 if (saved != null) {
                     forceBlur = saved.getBoolean("forceBlur") && bool(data, "getBlurEnabled");
                     if (forceBlur) module.forceBlurTypes.add(newType);
@@ -643,6 +647,7 @@ final class NativeClockPanel {
                             hideDate = initialHideDate;
                             dateSize = initialDateSize;
                             weatherSize = initialWeatherSize;
+                            labelReference = initialLabelReference;
                             weatherPreference = initialWeather;
                             forceBlur = initialForceBlur;
                             blurRadius = initialBlurRadius;
@@ -1343,6 +1348,7 @@ final class NativeClockPanel {
         settings.putBoolean("hideDate", hideDate);
         settings.putInt(ClockLabelScale.DATE, dateSize);
         settings.putInt(ClockLabelScale.WEATHER, weatherSize);
+        settings.putFloat(ClockLabelScale.REFERENCE, labelReference);
         settings.putBoolean(
                 "weatherEnabled",
                 weatherJob != null && weatherPreference != null
@@ -1682,7 +1688,9 @@ final class NativeClockPanel {
     private View labelSizeSlider(String name, int percent, boolean weather) throws Exception {
         return slider(name, ClockLabelScale.MIN / 100f, ClockLabelScale.MAX / 100f,
                 percent / 100f, true, 0, false, value -> {
-                    edit(weather ? ClockLabelScale.WEATHER : ClockLabelScale.DATE, ignored -> {
+                    edit(weather ? ClockLabelScale.WEATHER : ClockLabelScale.DATE, draft -> {
+                        if (labelReference == 0f)
+                            labelReference = ClockLabelScale.zoom(number(draft, "getScale").floatValue());
                         int size = ClockLabelScale.clamp(Math.round(value * 100));
                         if (weather) weatherSize = size;
                         else dateSize = size;
@@ -1695,7 +1703,7 @@ final class NativeClockPanel {
     }
 
     private void previewDateWeather() {
-        if (renderer instanceof View clock) DateEffects.preview(clock, hideDate, dateSize, weatherSize);
+        if (renderer instanceof View clock) DateEffects.preview(clock, hideDate, dateSize, weatherSize, labelReference);
     }
 
     private static String fontPath(Object data) {

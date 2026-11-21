@@ -6,6 +6,7 @@ final class ClockLabelScale {
     static final int MAX = 200;
     static final String DATE = "dateSizePercent";
     static final String WEATHER = "weatherSizePercent";
+    static final String REFERENCE = "labelReferenceScale";
 
     private ClockLabelScale() {}
 
@@ -13,12 +14,12 @@ final class ClockLabelScale {
         return Math.max(MIN, Math.min(MAX, percent));
     }
 
-    static float growth(float available, float base, float requested) {
-        if (requested <= base || requested <= available) return 1f;
-        return Math.max(0f, (available - base) / (requested - base));
+    static float reference(float value, int date, int weather) {
+        if (Float.isFinite(value) && value > 0f) return value;
+        return date == DEFAULT && weather == DEFAULT ? 0f : 1f;
     }
 
-    static float fit(float base, float requested, float growth) {
-        return requested <= base ? requested : base + (requested - base) * growth;
+    static float zoom(float value) {
+        return Float.isFinite(value) && value > 0f ? value : 1f;
     }
 }

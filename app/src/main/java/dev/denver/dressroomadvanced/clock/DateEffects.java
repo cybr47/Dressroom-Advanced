@@ -1,5 +1,6 @@
 package dev.denver.dressroomadvanced;
 
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
@@ -39,15 +40,24 @@ final class DateEffects {
     private static final Map<View, ClockLabelLayout> labelLayouts =
             Collections.synchronizedMap(new WeakHashMap<>());
 
-    private record Appearance(boolean hide, int date, int weather) {
+    private static final Map<View, Bounds> editorBounds =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<View, Integer> providerWidths =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    private record Bounds(float scale, int width, int height) {}
+
+    private record Appearance(boolean hide, int date, int weather, float reference) {
         static final Appearance DEFAULT =
-                new Appearance(false, ClockLabelScale.DEFAULT, ClockLabelScale.DEFAULT);
+                new Appearance(false, ClockLabelScale.DEFAULT, ClockLabelScale.DEFAULT, 0f);
 
         static Appearance from(Bundle settings) {
-            return settings == null ? DEFAULT : new Appearance(
-                    settings.getBoolean("hideDate"),
-                    ClockLabelScale.clamp(settings.getInt(ClockLabelScale.DATE, ClockLabelScale.DEFAULT)),
-                    ClockLabelScale.clamp(settings.getInt(ClockLabelScale.WEATHER, ClockLabelScale.DEFAULT)));
+            if (settings == null) return DEFAULT;
+            int date = ClockLabelScale.clamp(settings.getInt(ClockLabelScale.DATE, ClockLabelScale.DEFAULT));
+            int weather = ClockLabelScale.clamp(settings.getInt(ClockLabelScale.WEATHER, ClockLabelScale.DEFAULT));
+            float reference = ClockLabelScale.reference(
+                    settings.getFloat(ClockLabelScale.REFERENCE), date, weather);
+            return new Appearance(settings.getBoolean("hideDate"), date, weather, reference);
         }
     }
 
@@ -56,6 +66,7 @@ final class DateEffects {
     static void resetPreviews() {
         appearances.clear();
         identities.clear();
+        editorBounds.clear();
         synchronized (labelLayouts) {
             labelLayouts.values().forEach(ClockLabelLayout::restore);
             labelLayouts.clear();
@@ -144,12 +155,43 @@ final class DateEffects {
         }
     }
 
-    static void preview(View clock, boolean hide, int date, int weather) {
-        setAppearance(clock, new Appearance(hide, date, weather));
+    static void preview(View clock, boolean hide, int date, int weather, float reference) {
+        setAppearance(clock, new Appearance(hide, date, weather, reference));
     }
 
     static void bindSettings(View clock, Bundle settings) {
         setAppearance(clock, Appearance.from(settings));
+    }
+
+    static void editorBounds(View clock, Rect area, float scale, int maxHeight) {
+        if (area.isEmpty()) return;
+        scale = ClockLabelScale.zoom(scale);
+        int height = maxHeight > 0 ? Math.min(maxHeight, area.height()) : area.height();
+        Bounds next = new Bounds(scale, area.width(), height);
+        if (next.equals(editorBounds.put(clock, next))) return;
+        if (appearance(clock).reference() > 0f) apply(clock);
+    }
+
+    static ClockLabelFit.Size stockSize(View clock) {
+        ClockLabelLayout layout = labelLayouts.get(clock);
+        return layout == null ? null : layout.stock();
+    }
+
+    static synchronized void installProviderWidth(DressroomModule module, Class<?> renderer)
+            throws ReflectiveOperationException {
+        Method width = renderer.getMethod("setClockMaxWidth", int.class);
+        if (hooked.contains(width)) return;
+        module.hook(width)
+                .setId("dressroom-advanced.date-width")
+                .intercept(chain -> {
+                    View clock = (View) chain.getThisObject();
+                    providerWidths.put(clock, (Integer) chain.getArg(0));
+                    Object result = chain.proceed();
+                    if (tracked.contains(clock)) apply(clock);
+                    return result;
+                });
+        hooked.add(width);
+        module.deoptimize(width);
     }
 
     private static void setAppearance(View clock, Appearance appearance) {
@@ -167,6 +209,7 @@ final class DateEffects {
     static void clearPreview(View clock) {
         Appearance previous = appearances.remove(clock);
         identities.remove(clock);
+        editorBounds.remove(clock);
         ClockLabelLayout layout = labelLayouts.remove(clock);
         if (layout != null)
             layout.restore();
@@ -229,14 +272,43 @@ final class DateEffects {
             updateText(dateRow, hide && weather.getVisibility() != View.VISIBLE);
         }
         boolean resize = (!measured.contains(clock) || clock.isAttachedToWindow())
-                && (appearance.date() != ClockLabelScale.DEFAULT
-                        || appearance.weather() != ClockLabelScale.DEFAULT);
-        ClockLabelLayout layout = resize
-                ? labelLayouts.computeIfAbsent(clock, ignored -> new ClockLabelLayout())
-                : labelLayouts.remove(clock);
-        if (layout != null) layout.apply(clock,
-                resize ? appearance.date() : ClockLabelScale.DEFAULT,
-                resize ? appearance.weather() : ClockLabelScale.DEFAULT);
+                && appearance.reference() > 0f;
+        if (!resize) {
+            ClockLabelLayout previous = labelLayouts.remove(clock);
+            if (previous != null) previous.restore();
+            return;
+        }
+
+        Bounds bounds = editorBounds.get(clock);
+        if (bounds == null) {
+            float scale = ClockLabelScale.zoom(clock.getScaleX());
+            if (clock instanceof ViewGroup group) {
+                View content = clockContent(group);
+                if (content != null) scale *= ClockLabelScale.zoom(content.getScaleX());
+            }
+            int width = providerWidths.getOrDefault(clock, 0);
+            if (width <= 0) {
+                width = clock.getResources().getDisplayMetrics().widthPixels
+                        - clock.getPaddingLeft() - clock.getPaddingRight();
+            }
+            bounds = new Bounds(scale, width, clock.getResources().getDisplayMetrics().heightPixels);
+        }
+        if (bounds.width() <= 0 || bounds.height() <= 0) return;
+        ClockLabelLayout layout = labelLayouts.computeIfAbsent(clock, ignored -> new ClockLabelLayout());
+        layout.apply(clock, appearance.date(), appearance.weather(), appearance.reference(), bounds.scale(),
+                (int) (bounds.width() / bounds.scale()), (int) (bounds.height() / bounds.scale()));
+    }
+
+    private static View clockContent(ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if ("common_time_date_container".equals(entryName(child))) return child;
+            if (child instanceof ViewGroup children) {
+                View content = clockContent(children);
+                if (content != null) return content;
+            }
+        }
+        return null;
     }
 
     private static void applySubtree(View view, boolean hide, View[] rowPair) {
