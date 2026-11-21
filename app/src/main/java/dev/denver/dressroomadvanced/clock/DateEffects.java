@@ -177,9 +177,29 @@ final class DateEffects {
         return layout == null ? null : layout.stock();
     }
 
-    static synchronized void installProviderWidth(DressroomModule module, Class<?> renderer)
+    static synchronized void installProviderSizing(DressroomModule module, Class<?> renderer)
             throws ReflectiveOperationException {
         Method width = renderer.getMethod("setClockMaxWidth", int.class);
+        installProviderWidth(module, width);
+
+        Method scale = renderer.getMethod("setScale", float.class);
+        if (hooked.contains(scale)) return;
+        module.hook(scale)
+                .setId("dressroom-advanced.label-native-scale")
+                .intercept(chain -> {
+                    View clock = (View) chain.getThisObject();
+                    ClockLabelLayout layout = labelLayouts.get(clock);
+                    // Stock sizes for Samsung's scale pass
+                    if (layout != null) layout.restore();
+                    Object result = chain.proceed();
+                    if (layout != null) deferUpdate(clock);
+                    return result;
+                });
+        hooked.add(scale);
+        module.deoptimize(scale);
+    }
+
+    private static void installProviderWidth(DressroomModule module, Method width) {
         if (hooked.contains(width)) return;
         module.hook(width)
                 .setId("dressroom-advanced.date-width")
@@ -280,6 +300,7 @@ final class DateEffects {
         }
 
         Bounds bounds = editorBounds.get(clock);
+        float nativeScale = 1f;
         if (bounds == null) {
             float scale = ClockLabelScale.zoom(clock.getScaleX());
             if (clock instanceof ViewGroup group) {
@@ -292,11 +313,22 @@ final class DateEffects {
                         - clock.getPaddingLeft() - clock.getPaddingRight();
             }
             bounds = new Bounds(scale, width, clock.getResources().getDisplayMetrics().heightPixels);
+            nativeScale = nativeScale(clock);
         }
         if (bounds.width() <= 0 || bounds.height() <= 0) return;
         ClockLabelLayout layout = labelLayouts.computeIfAbsent(clock, ignored -> new ClockLabelLayout());
-        layout.apply(clock, appearance.date(), appearance.weather(), appearance.reference(), bounds.scale(),
+        float factor = ClockLabelScale.labelFactor(appearance.reference(), bounds.scale(), nativeScale);
+        layout.apply(clock, appearance.date(), appearance.weather(), factor,
                 (int) (bounds.width() / bounds.scale()), (int) (bounds.height() / bounds.scale()));
+    }
+
+    private static float nativeScale(View clock) {
+        try {
+            Object value = Reflect.call(clock, "getScale");
+            if (value instanceof Number scale) return scale.floatValue();
+        } catch (ReflectiveOperationException ignored) {
+        }
+        return 1f;
     }
 
     private static View clockContent(ViewGroup group) {

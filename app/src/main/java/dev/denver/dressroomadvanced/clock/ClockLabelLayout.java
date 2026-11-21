@@ -94,7 +94,7 @@ final class ClockLabelLayout {
         return stock;
     }
 
-    void apply(View clock, int date, int weather, float reference, float clockScale, int width, int height) {
+    void apply(View clock, int date, int weather, float base, int width, int height) {
         Part root = measure(clock, FIXED, true);
         if (root == null || !root.adjustable()) {
             restore();
@@ -103,7 +103,6 @@ final class ClockLabelLayout {
         ClockLabelFit.Size limit = new ClockLabelFit.Size(width, height);
         stock = root.size(STOCK);
         if (!stock.fits(new ClockLabelFit.Size(Float.MAX_VALUE, Float.MAX_VALUE))) stock = null;
-        float base = reference / clockScale;
         ClockLabelFit.Scales requested = new ClockLabelFit.Scales(
                 base * date / ClockLabelScale.DEFAULT, base * weather / ClockLabelScale.DEFAULT);
         ClockLabelFit.Scales fitted = ClockLabelFit.fit(limit, requested, base,

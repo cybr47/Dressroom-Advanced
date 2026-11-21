@@ -28,6 +28,15 @@ public final class ClockLabelScaleTest {
         equal(1, ClockLabelScale.reference(0f, 110, 100));
         equal(1.35f, ClockLabelScale.reference(1.35f, 100, 100));
 
+        float zoom = 1.6875f;
+        float previewFactor = ClockLabelScale.labelFactor(1, zoom, 1);
+        float appliedFactor = ClockLabelScale.labelFactor(1, 1, zoom);
+        equal(20, 20 * previewFactor * zoom);
+        equal(20, 20 * zoom * appliedFactor);
+        equal(40, 20 * zoom * appliedFactor * 2);
+        equal(20, 20 * ClockLabelScale.labelFactor(1, 1.125f, 1.5f) * 1.125f * 1.5f);
+        equal(1, ClockLabelScale.labelFactor(1, Float.NaN, 0));
+
         ClockLabelFit.Size walls = new ClockLabelFit.Size(420, 240);
         ClockLabelFit.Scales loose = ClockLabelFit.fit(walls, new ClockLabelFit.Scales(2, 1),
                 1, ClockLabelScaleTest::row);

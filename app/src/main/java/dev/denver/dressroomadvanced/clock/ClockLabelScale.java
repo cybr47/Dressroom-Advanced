@@ -19,6 +19,10 @@ final class ClockLabelScale {
         return date == DEFAULT && weather == DEFAULT ? 0f : 1f;
     }
 
+    static float labelFactor(float reference, float viewScale, float nativeScale) {
+        return reference / zoom(viewScale) / zoom(nativeScale);
+    }
+
     static float zoom(float value) {
         return Float.isFinite(value) && value > 0f ? value : 1f;
     }

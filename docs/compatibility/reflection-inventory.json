@@ -513,6 +513,12 @@
       "target": "setClockMaxWidth"
     },
     {
+      "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/DateEffects.java",
+      "line": 185,
+      "kind": "public-method",
+      "target": "setScale"
+    },
+    {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/GlyphDrawReuse.java",
       "line": 32,
       "kind": "class",

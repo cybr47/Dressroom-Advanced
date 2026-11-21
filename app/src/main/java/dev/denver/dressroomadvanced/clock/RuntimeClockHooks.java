@@ -182,9 +182,9 @@ final class RuntimeClockHooks {
                 }
             }
             try {
-                DateEffects.installProviderWidth(module, base);
+                DateEffects.installProviderSizing(module, base);
             } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-                module.report("Clock width binding unavailable", error);
+                module.report("Clock sizing binding unavailable", error);
             }
             VariableFonts.install(module, base, view -> profiles.get(view));
             Class<?> font =
