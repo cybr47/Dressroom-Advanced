@@ -21,7 +21,7 @@ final class DateEffects {
                     "common_home_date_view",
                     "common_home_date_upper_view",
                     "common_home_date_lower_view");
-    private static final Map<View, Boolean> previews =
+    private static final Map<View, Appearance> appearances =
             Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<View, int[]> identities =
             Collections.synchronizedMap(new WeakHashMap<>());
@@ -36,14 +36,37 @@ final class DateEffects {
             Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
     private static final Set<Method> hooked = new java.util.HashSet<>();
 
+    private static final Map<View, ClockLabelLayout> labelLayouts =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    private record Appearance(boolean hide, int date, int weather) {
+        static final Appearance DEFAULT =
+                new Appearance(false, ClockLabelScale.DEFAULT, ClockLabelScale.DEFAULT);
+
+        static Appearance from(Bundle settings) {
+            return settings == null ? DEFAULT : new Appearance(
+                    settings.getBoolean("hideDate"),
+                    ClockLabelScale.clamp(settings.getInt(ClockLabelScale.DATE, ClockLabelScale.DEFAULT)),
+                    ClockLabelScale.clamp(settings.getInt(ClockLabelScale.WEATHER, ClockLabelScale.DEFAULT)));
+        }
+    }
+
     private DateEffects() {}
 
     static void resetPreviews() {
-        previews.clear();
+        appearances.clear();
         identities.clear();
+        synchronized (labelLayouts) {
+            labelLayouts.values().forEach(ClockLabelLayout::restore);
+            labelLayouts.clear();
+        }
     }
 
     static synchronized void attach(DressroomModule module, View clock) {
+        if (tracked.add(clock)) {
+            clock.addOnLayoutChangeListener(
+                    (v, l, t, r, b, ol, ot, or, ob) -> updateDate(v));
+        }
         try {
             Method setter = clock.getClass().getMethod("setDateVisibility", int.class);
             if (!hooked.contains(setter)) {
@@ -85,18 +108,15 @@ final class DateEffects {
                                     Object result = chain.proceed();
                                     View target = (View) chain.getThisObject();
                                     updateDate(target);
+                                    deferUpdate(target);
                                     return result;
                                 });
                 hooked.add(method);
             }
-            if (tracked.add(clock)) {
-                clock.addOnLayoutChangeListener(
-                        (v, l, t, r, b, ol, ot, or, ob) -> updateDate(clock));
-            }
-            apply(clock);
         } catch (Exception | LinkageError e) {
             module.report("Date visibility unavailable for this clock", e);
         }
+        apply(clock);
     }
 
     static synchronized void prepareMeasurement(DressroomModule module, View clock) {
@@ -124,23 +144,33 @@ final class DateEffects {
         }
     }
 
-    static void preview(View clock, DressroomModule module, boolean hide) {
-        previews.put(clock, hide);
-        try {
-            apply(clock);
-        } catch (Exception e) {
-            module.report("Date preview unavailable", e);
-        }
+    static void preview(View clock, boolean hide, int date, int weather) {
+        setAppearance(clock, new Appearance(hide, date, weather));
+    }
+
+    static void bindSettings(View clock, Bundle settings) {
+        setAppearance(clock, Appearance.from(settings));
+    }
+
+    private static void setAppearance(View clock, Appearance appearance) {
+        appearances.put(clock, appearance);
+        apply(clock);
     }
 
     static void bindIdentity(View clock, int type, int font, int orientation) {
-        identities.put(clock, new int[] {type, font, orientation});
+        int[] next = {type, font, orientation};
+        if (java.util.Arrays.equals(identities.put(clock, next), next)) return;
+        appearances.remove(clock);
         apply(clock);
     }
 
     static void clearPreview(View clock) {
-        previews.remove(clock);
-        apply(clock);
+        Appearance previous = appearances.remove(clock);
+        identities.remove(clock);
+        ClockLabelLayout layout = labelLayouts.remove(clock);
+        if (layout != null)
+            layout.restore();
+        if (previous != null && previous.hide()) apply(clock);
     }
 
     static void apply(View clock) {
@@ -169,9 +199,9 @@ final class DateEffects {
         pending.remove(clock);
     }
 
-    private static Boolean shouldHide(View clock) {
-        Boolean preview = previews.get(clock);
-        if (preview != null) return preview;
+    private static Appearance appearance(View clock) {
+        Appearance bound = appearances.get(clock);
+        if (bound != null) return bound;
         try {
             Bundle query = new Bundle();
             int[] identity = identities.get(clock);
@@ -183,28 +213,37 @@ final class DateEffects {
             query.putInt(
                     "font", identity == null ? ClockBinding.of(clock).fontId(clock) : identity[1]);
             if (identity != null) query.putInt(LayoutOrientation.FIELD, identity[2]);
-            Bundle saved = SettingsBridge.read(clock.getContext(), query);
-            return saved != null && saved.getBoolean("hideDate");
+            return Appearance.from(SettingsBridge.read(clock.getContext(), query));
         } catch (Exception ignored) {
-            return false;
+            return Appearance.DEFAULT;
         }
     }
 
     private static void updateDate(View clock) {
-        boolean hide = Boolean.TRUE.equals(shouldHide(clock));
+        Appearance appearance = appearance(clock);
+        boolean hide = appearance.hide();
         View[] rowPair = new View[2];
         applySubtree(clock, hide, rowPair);
         View weather = rowPair[0], dateRow = rowPair[1];
         if (dateRow != null && weather != null) {
             updateText(dateRow, hide && weather.getVisibility() != View.VISIBLE);
         }
+        boolean resize = (!measured.contains(clock) || clock.isAttachedToWindow())
+                && (appearance.date() != ClockLabelScale.DEFAULT
+                        || appearance.weather() != ClockLabelScale.DEFAULT);
+        ClockLabelLayout layout = resize
+                ? labelLayouts.computeIfAbsent(clock, ignored -> new ClockLabelLayout())
+                : labelLayouts.remove(clock);
+        if (layout != null) layout.apply(clock,
+                resize ? appearance.date() : ClockLabelScale.DEFAULT,
+                resize ? appearance.weather() : ClockLabelScale.DEFAULT);
     }
 
     private static void applySubtree(View view, boolean hide, View[] rowPair) {
         if (view == null) return;
         String entry = entryName(view);
         if (entry != null) {
-            if (DATE_TEXT_ENTRIES.contains(entry)) {
+            if (isDate(entry)) {
                 updateText(view, hide);
             } else if ("common_weather_container".equals(entry)) {
                 updateWeatherMargin(view, hide);
@@ -250,7 +289,11 @@ final class DateEffects {
         }
     }
 
-    private static String entryName(View view) {
+    static boolean isDate(String entry) {
+        return entry != null && DATE_TEXT_ENTRIES.contains(entry);
+    }
+
+    static String entryName(View view) {
         int id = view.getId();
         if (id == View.NO_ID) return null;
         try {

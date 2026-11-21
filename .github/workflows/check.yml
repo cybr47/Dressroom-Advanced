@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**']
   pull_request:
   workflow_dispatch:
 
@@ -37,34 +37,37 @@ jobs:
           ./scripts/check-repository.ps1
           ./scripts/check-layout.ps1
           python scripts/compatibility-inventory.py --check
-      - name: Build unsigned APK
-        id: build
+      - name: Build release APK
         shell: pwsh
         run: ./build-local.ps1 -Sdk $env:ANDROID_HOME -Unsigned
       - name: Run JVM contracts
         shell: pwsh
         run: ./test-local.ps1 -Sdk $env:ANDROID_HOME -Suite Jvm -SkipBuild
-      - name: Upload unsigned APK and check results
-        if: always() && steps.build.outcome == 'success'
+      - name: Build signed debug APK
+        shell: pwsh
+        run: |
+          $key = Join-Path $env:RUNNER_TEMP 'dressroom-debug.jks'
+          keytool -genkeypair -keystore $key -alias alpha -keyalg RSA -keysize 2048 -validity 3650 -storepass android -keypass android -dname 'CN=Dressroom CI Debug'
+          if ($LASTEXITCODE -ne 0) { throw 'Debug key generation failed' }
+          ./build-local.ps1 -Sdk $env:ANDROID_HOME -Debug -Keystore $key -BuildDir .build/debug
+      - name: Collect APKs
+        shell: pwsh
+        run: |
+          $release = Get-Item artifacts/current/*-unsigned.apk
+          Rename-Item -LiteralPath $release.FullName -NewName ($release.Name -replace '-unsigned.apk$', '-release-unsigned.apk')
+      - name: Upload APK ZIP
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: unsigned-apk-${{ github.sha }}
-          path: |
-            artifacts/current/*-unsigned.apk
-            .build/tests/Jvm/results.txt
+          name: dressroom-advanced-apks-${{ github.sha }}
+          path: artifacts/current/*.apk
           if-no-files-found: error
           retention-days: 7
-          include-hidden-files: true
       - name: Build summary
         if: success()
         shell: pwsh
         run: |
-          $apk = Get-Item artifacts/current/*-unsigned.apk
-          $hash = (Get-FileHash $apk -Algorithm SHA256).Hash.ToLowerInvariant()
-          @"
-          APK: $($apk.Name)
-
-          SHA-256: $hash
-
-          This build is unsigned. Sign it with your own key before installing.
-          "@ >> $env:GITHUB_STEP_SUMMARY
+          foreach ($apk in Get-ChildItem artifacts/current/*.apk) {
+            $hash = (Get-FileHash $apk -Algorithm SHA256).Hash.ToLowerInvariant()
+            "- $($apk.Name): $hash" >> $env:GITHUB_STEP_SUMMARY
+          }
+          "The debug APK is signed with a per-run CI key. The release APK requires signing before installation." >> $env:GITHUB_STEP_SUMMARY

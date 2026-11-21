@@ -74,6 +74,8 @@ final class NativeClockPanel {
     private ShadowValues shadowValues, initialShadowValues;
     private boolean hideDate;
     private boolean initialHideDate;
+    private int dateSize = ClockLabelScale.DEFAULT, weatherSize = ClockLabelScale.DEFAULT;
+    private int initialDateSize, initialWeatherSize;
     private Boolean weatherPreference;
     private boolean initialWeather;
     private boolean forceBlur;
@@ -87,6 +89,7 @@ final class NativeClockPanel {
     private byte[] depthMask, initialDepthMask;
     private android.os.Bundle depthSource = new android.os.Bundle();
     private CompoundButton dateOrderControl;
+    private View dateSizeControl;
     private int[] manualProgress;
     private android.os.Bundle fontValues = new android.os.Bundle();
     private android.os.Bundle initialFontValues = new android.os.Bundle();
@@ -214,12 +217,7 @@ final class NativeClockPanel {
             int newType = number(data, "getClockType").intValue();
             Object font = Reflect.call(data, "getClockFontData");
             int newFont = number(font, "getClockFontType").intValue();
-            String newFontPath = "";
-            try {
-                Object path = Reflect.call(font, "getClockFontPath");
-                if (path instanceof String) newFontPath = (String) path;
-            } catch (Exception ignored) {
-            }
+            String newFontPath = fontPath(data);
             boolean newSelection =
                     initialSnapshot == null
                             || expectedType != newType
@@ -249,6 +247,12 @@ final class NativeClockPanel {
                         saved != null && saved.containsKey("fontNativeStretch")
                                 ? saved.getBoolean("fontNativeStretch")
                                 : bool(font, "isStretchableFont");
+                initialDateSize = dateSize = ClockLabelScale.clamp(saved == null
+                        ? ClockLabelScale.DEFAULT
+                        : saved.getInt(ClockLabelScale.DATE, ClockLabelScale.DEFAULT));
+                initialWeatherSize = weatherSize = ClockLabelScale.clamp(saved == null
+                        ? ClockLabelScale.DEFAULT
+                        : saved.getInt(ClockLabelScale.WEATHER, ClockLabelScale.DEFAULT));
                 if (saved != null) {
                     forceBlur = saved.getBoolean("forceBlur") && bool(data, "getBlurEnabled");
                     if (forceBlur) module.forceBlurTypes.add(newType);
@@ -580,13 +584,9 @@ final class NativeClockPanel {
                         hideDate = !show;
                         if (dateOrderControl != null)
                             dateOrderControl.setVisibility(hideDate ? View.GONE : View.VISIBLE);
-                        if (renderer instanceof View) {
-                            View clock = (View) renderer;
-                            DateEffects.preview(clock, module, hideDate);
-                            DateEffects.apply(clock);
-                            clock.requestLayout();
-                            clock.invalidate();
-                        }
+                        if (dateSizeControl != null)
+                            dateSizeControl.setVisibility(hideDate ? View.GONE : View.VISIBLE);
+                        previewDateWeather();
                         NativeEdits.remeasure(controller, bool(data(), "getShowWeatherInfo"));
                         finishNativeEdit();
                         stage(data());
@@ -606,7 +606,10 @@ final class NativeClockPanel {
                 module.report("Weather capability unavailable", error);
                 label("Weather controls are unavailable for this clock.", 12, false);
             }
+            dateSizeControl = labelSizeSlider("Date size", dateSize, false);
+            dateSizeControl.setVisibility(hideDate ? View.GONE : View.VISIBLE);
             if (weatherSupported) {
+                labelSizeSlider("Weather size", weatherSize, true);
                 toggle(
                         "Weather information",
                         weatherPreference != null
@@ -638,6 +641,8 @@ final class NativeClockPanel {
                             shadowPreference = customShadow;
                             shadowValues = initialShadowValues;
                             hideDate = initialHideDate;
+                            dateSize = initialDateSize;
+                            weatherSize = initialWeatherSize;
                             weatherPreference = initialWeather;
                             forceBlur = initialForceBlur;
                             blurRadius = initialBlurRadius;
@@ -649,8 +654,7 @@ final class NativeClockPanel {
                             fontFileName = initialFontFileName;
                             updateDepthPreview(data());
                             if (forceBlur) module.forceBlurTypes.add(expectedType);
-                            if (renderer instanceof View)
-                                DateEffects.preview((View) renderer, module, hideDate);
+                            previewDateWeather();
                             if (initialManual && initialFontFile.isEmpty()) {
                                 Object restored =
                                         Reflect.call(
@@ -1103,6 +1107,7 @@ final class NativeClockPanel {
         if (current != renderer && renderer instanceof View) {
             View retired = (View) renderer;
             EditorClockRefresh.cancel(retired);
+            DateEffects.clearPreview(retired);
             BlurEffects.clearPreview(retired);
             DepthEffects.apply(retired, false, null);
             ShadowEffects.apply(retired, false, 0, 0, 0, 0);
@@ -1173,13 +1178,7 @@ final class NativeClockPanel {
         flush();
         try {
             Object current = data();
-            if (number(current, "getClockType").intValue() == expectedType
-                    && number(Reflect.call(current, "getClockFontData"), "getClockFontType")
-                                    .intValue()
-                            == expectedFont
-                    && expectedScreen == ScreenIdentity.current()
-                    && expectedOrientation == module.layoutOrientation(context)
-                    && expectedScene.equals(module.scene())) {
+            if (matchesSelection(current)) {
                 stage(current);
                 return true;
             }
@@ -1212,10 +1211,18 @@ final class NativeClockPanel {
                     || !expectedScene.equals(module.scene())) {
                 throw new IllegalStateException("Clock changed. Select Advanced again.");
             }
+            if (edits.keySet().stream().allMatch(NativeClockPanel::labelSizeEdit)) {
+                for (Edit edit : edits.values()) edit.apply(source);
+                stage(source);
+                previewDateWeather();
+                setStatus("");
+                return;
+            }
             Object draft = copy(source);
             NativeEdits.changing(controller, true);
             if (customShadow && shadowValues != null) putShadow(draft, shadowValues);
             for (Edit edit : edits.values()) edit.apply(draft);
+            if (edits.keySet().stream().anyMatch(NativeClockPanel::labelSizeEdit)) previewDateWeather();
             if (edits.keySet().stream().anyMatch(k -> k.startsWith("shadow")))
                 shadowValues = customShadow ? shadowValues(draft) : null;
             stage(draft);
@@ -1334,6 +1341,8 @@ final class NativeClockPanel {
             if (manualProgress != null) settings.putIntArray("manualProgress", manualProgress);
         }
         settings.putBoolean("hideDate", hideDate);
+        settings.putInt(ClockLabelScale.DATE, dateSize);
+        settings.putInt(ClockLabelScale.WEATHER, weatherSize);
         settings.putBoolean(
                 "weatherEnabled",
                 weatherJob != null && weatherPreference != null
@@ -1670,6 +1679,44 @@ final class NativeClockPanel {
         if (renderer instanceof View clock) VariableFonts.preview(clock, fontPreviewSettings());
     }
 
+    private View labelSizeSlider(String name, int percent, boolean weather) throws Exception {
+        return slider(name, ClockLabelScale.MIN / 100f, ClockLabelScale.MAX / 100f,
+                percent / 100f, true, 0, false, value -> {
+                    edit(weather ? ClockLabelScale.WEATHER : ClockLabelScale.DATE, ignored -> {
+                        int size = ClockLabelScale.clamp(Math.round(value * 100));
+                        if (weather) weatherSize = size;
+                        else dateSize = size;
+                    });
+                });
+    }
+
+    private static boolean labelSizeEdit(String key) {
+        return ClockLabelScale.DATE.equals(key) || ClockLabelScale.WEATHER.equals(key);
+    }
+
+    private void previewDateWeather() {
+        if (renderer instanceof View clock) DateEffects.preview(clock, hideDate, dateSize, weatherSize);
+    }
+
+    private static String fontPath(Object data) {
+        try {
+            Object path = Reflect.call(Reflect.call(data, "getClockFontData"), "getClockFontPath");
+            if (path instanceof String value) return value;
+        } catch (Exception ignored) {
+        }
+        return "";
+    }
+
+    private boolean matchesSelection(Object source) throws Exception {
+        return number(source, "getClockType").intValue() == expectedType
+                && number(Reflect.call(source, "getClockFontData"), "getClockFontType").intValue()
+                        == expectedFont
+                && expectedFontPath.equals(fontPath(source))
+                && expectedScreen == ScreenIdentity.current()
+                && expectedOrientation == module.layoutOrientation(context)
+                && expectedScene.equals(module.scene());
+    }
+
     private View slider(
             String name, float min, float max, float current, boolean percent, SliderEdit edit)
             throws Exception {
@@ -1685,6 +1732,12 @@ final class NativeClockPanel {
             int precision,
             SliderEdit edit)
             throws Exception {
+        return slider(name, min, max, current, percent, precision, true, edit);
+    }
+
+    private View slider(
+            String name, float min, float max, float current, boolean percent, int precision,
+            boolean nativeGesture, SliderEdit edit) throws Exception {
         LinearLayout parent = currentGroup;
         currentGroup = new LinearLayout(context);
         currentGroup.setOrientation(LinearLayout.VERTICAL);
@@ -1715,7 +1768,7 @@ final class NativeClockPanel {
                 proxy(
                         listener,
                         (method, args) -> {
-                            if (method.getName().equals("onStartTrackingTouch"))
+                            if (nativeGesture && method.getName().equals("onStartTrackingTouch"))
                                 NativeEdits.changing(controller, true);
                             else if (method.getName().equals("onProgressChanged")
                                     && Boolean.TRUE.equals(args[2])) {
@@ -1730,7 +1783,8 @@ final class NativeClockPanel {
                                 edit.apply(value);
                             } else if (method.getName().equals("onStopTrackingTouch")) {
                                 flush();
-                                finishNativeEdit();
+                                if (nativeGesture) finishNativeEdit();
+                                else if (renderer instanceof View clock) refreshClockSurface(clock);
                             }
                             return null;
                         });
@@ -1738,7 +1792,7 @@ final class NativeClockPanel {
         currentGroup.addView(slider);
         PanelRows.slider(currentGroup, caption, slider);
         currentGroup = parent;
-        return slider;
+        return (View) slider.getParent();
     }
 
     private int resource(String name, String kind) {

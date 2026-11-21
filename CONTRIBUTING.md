@@ -34,7 +34,7 @@ These are development credentials, not a release-key policy. Your key cannot upd
 - Explain unusual native ownership or timing in a short comment. A comment should say why the code exists, not narrate each assignment.
 - Include the affected One UI/app versions and what you actually checked in a pull request. JVM tests alone cannot verify a Samsung animation.
 
-The [Build workflow](.github/workflows/check.yml) checks repository contents and the reflection inventory, builds an unsigned APK and runs JVM checks. APKs and check results are available as workflow artifacts for seven days. They are unsigned and cannot update an official installation without the same signing key. Native-device checks remain local.
+The [Build workflow](.github/workflows/check.yml) checks the repository, runs JVM tests and uploads a ZIP with a signed debug APK and an unsigned release APK. The artifact is available for seven days. The debug key is generated per run. Use your own development key for repeat installs over a build you signed previously. Native-device checks remain local.
 
 Workflow actions are pinned by commit. Dependabot proposes monthly updates; they are not merged automatically.
 

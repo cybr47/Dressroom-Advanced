@@ -3,6 +3,7 @@ param(
     [string]$ApiAar = '',
     [string]$BuildDir = '',
     [string]$Keystore = '',
+    [switch]$Debug,
     [switch]$Unsigned
 )
 $ErrorActionPreference = 'Stop'
@@ -53,6 +54,11 @@ Invoke-ProjectTool (Join-Path $tools 'd8.bat') @('--lib',$androidJar,'--classpat
 # Gradle owns version/SDK values; the CLI generates its manifest from the same values.
 $manifest = [xml](Get-Content -LiteralPath (Join-Path $project 'app/src/main/AndroidManifest.xml') -Raw)
 $androidNamespace = 'http://schemas.android.com/apk/res/android'
+if ($Debug) {
+    $attribute = $manifest.CreateAttribute('android','debuggable',$androidNamespace)
+    $attribute.Value = 'true'
+    $null = $manifest.manifest.application.Attributes.Append($attribute)
+}
 foreach ($pair in @(@('versionCode',"$($config.versionCode)"),@('versionName',$config.versionName))) {
     $attribute = $manifest.CreateAttribute('android',$pair[0],$androidNamespace)
     $attribute.Value = $pair[1]; $null = $manifest.manifest.Attributes.Append($attribute)
@@ -71,7 +77,8 @@ $aligned = Join-Path $buildRoot 'aligned.apk'
 Invoke-ProjectTool (Join-Path $tools 'zipalign.exe') @('-f','4',$baseApk,$aligned)
 $outputDir = Join-Path $project 'artifacts/current'
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-$suffix = if ($Unsigned) { '-unsigned' } else { '' }
+$suffix = if ($Debug) { '-debug' } else { '' }
+if ($Unsigned) { $suffix += '-unsigned' }
 $output = Join-Path $outputDir "dressroom-advanced-$($config.versionName)$suffix.apk"
 if ($Unsigned) {
     Copy-Item -LiteralPath $aligned -Destination $output -Force

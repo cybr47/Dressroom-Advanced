@@ -635,6 +635,7 @@ final class RuntimeClockHooks {
             }
             if (settings == null) {
                 profiles.remove(view);
+                DateEffects.bindSettings(view, null);
                 if (effects.remove(view)) ShadowEffects.apply(view, false, 0, 0, 0, 0);
                 DepthEffects.apply(view, false, null);
                 DepthEffects.applyDigits(view, false, null);
@@ -652,6 +653,7 @@ final class RuntimeClockHooks {
                 return;
             }
             profiles.put(view, settings);
+            DateEffects.bindSettings(view, settings);
             if (FontAxisSettings.nativeStretch(settings)
                     && (settings.getBoolean("manual") || settings.getBoolean("depthEnabled"))
                     && settings.getFloatArray("manualHeights") != null
