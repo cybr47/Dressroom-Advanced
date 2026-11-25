@@ -48,6 +48,7 @@ final class DateEffects {
     static void resetPreviews() {
         previews.clear();
         identities.clear();
+        ClockLabelPlacement.resetPreviews();
         ClockLabelSizing.reset();
     }
 
@@ -60,6 +61,7 @@ final class DateEffects {
                         .intercept(
                                 chain -> {
                                     View target = (View) chain.getThisObject();
+                                    ClockLabelPlacement.beforeNativeVisibilityChange(target);
                                     Object result = chain.proceed();
                                     updateDate(target);
                                     deferUpdate(target);
@@ -74,8 +76,9 @@ final class DateEffects {
                         .setId("dressroom-advanced.weather-layout")
                         .intercept(
                                 chain -> {
-                                    Object result = chain.proceed();
                                     View target = (View) chain.getThisObject();
+                                    ClockLabelPlacement.beforeNativeVisibilityChange(target);
+                                    Object result = chain.proceed();
                                     updateDate(target);
                                     deferUpdate(target);
                                     return result;
@@ -90,8 +93,9 @@ final class DateEffects {
                         .setId("dressroom-advanced.weather-info-layout")
                         .intercept(
                                 chain -> {
-                                    Object result = chain.proceed();
                                     View target = (View) chain.getThisObject();
+                                    ClockLabelPlacement.beforeNativeVisibilityChange(target);
+                                    Object result = chain.proceed();
                                     updateDate(target);
                                     return result;
                                 });
@@ -132,20 +136,32 @@ final class DateEffects {
         }
     }
 
-    static void preview(View clock, boolean hide, int date, int weather, float reference) {
+    static void preview(View clock, boolean hide, int date, int weather, float reference,
+                        ClockLabelPosition datePosition, ClockLabelPosition weatherPosition) {
         previews.put(clock, hide);
+        ClockLabelPlacement.bind(clock, datePosition, weatherPosition, true);
         ClockLabelSizing.bind(clock, date, weather, reference);
         apply(clock);
     }
 
     static void preview(View clock, Bundle settings) {
         previews.put(clock, settings != null && settings.getBoolean("hideDate"));
+        bindPositions(clock, settings, true);
         ClockLabelSizing.bind(clock, settings);
         apply(clock);
     }
 
     static void bindSettings(View clock, Bundle settings) {
+        boolean hadPosition = ClockLabelPlacement.hasPosition(clock);
+        bindPositions(clock, settings, false);
         ClockLabelSizing.bind(clock, settings);
+        if (hadPosition || ClockLabelPlacement.hasPosition(clock)) apply(clock);
+        else ClockLabelSizing.apply(clock);
+    }
+
+    private static void bindPositions(View clock, Bundle settings, boolean preview) {
+        ClockLabelPlacement.bind(clock, ClockLabelPosition.from(settings, ClockLabelPosition.DATE),
+                ClockLabelPosition.from(settings, ClockLabelPosition.WEATHER), preview);
     }
 
     static boolean hideDate(View clock) {
@@ -172,6 +188,7 @@ final class DateEffects {
 
     static void clearPreview(View clock) {
         previews.remove(clock);
+        ClockLabelPlacement.clear(clock);
         ClockLabelSizing.clear(clock);
         apply(clock);
     }
@@ -228,10 +245,14 @@ final class DateEffects {
         View[] rowPair = new View[2];
         applySubtree(clock, hide, rowPair);
         View weather = rowPair[0], dateRow = rowPair[1];
-        if (dateRow != null && weather != null) {
-            boolean weatherVisible = weather.getVisibility() == View.VISIBLE;
-            updateText(dateRow, hide && !weatherVisible);
-            alignSingleLabel(dateRow, weather, hide && weatherVisible);
+        if (dateRow != null && weather != null)
+            updateText(dateRow, hide && ClockLabelPlacement.visibility(weather) != View.VISIBLE);
+        ClockLabelPlacement.apply(clock, hide, dateRow, weather, measured.contains(clock));
+        boolean dateRemoved = hide || ClockLabelPlacement.dateDetached(clock);
+        if (weather != null) {
+            updateWeatherMargin(weather, dateRemoved);
+            if (dateRow != null)
+                alignSingleLabel(dateRow, weather, dateRemoved && weather.getVisibility() == View.VISIBLE);
         }
         ClockLabelSizing.apply(clock);
     }
@@ -282,13 +303,13 @@ final class DateEffects {
         if (entry != null) {
             if (DATE_TEXT_ENTRIES.contains(entry)) {
                 updateText(view, hide);
-            } else if ("common_weather_container".equals(entry)) {
-                updateWeatherMargin(view, hide);
-                if (rowPair[0] == null) rowPair[0] = view;
             } else if ("common_date_container".equals(entry)) {
                 if (rowPair[1] == null) rowPair[1] = view;
             }
         }
+        if (ClockLabelPlacement.isWeather(view, entry)
+                && (rowPair[0] == null || (ClockLabelPlacement.visibility(rowPair[0]) != View.VISIBLE
+                        && ClockLabelPlacement.visibility(view) == View.VISIBLE))) rowPair[0] = view;
         if (view instanceof ViewGroup group) {
             for (int i = 0; i < group.getChildCount(); i++) {
                 applySubtree(group.getChildAt(i), hide, rowPair);
@@ -316,13 +337,15 @@ final class DateEffects {
 
     private static void updateText(View date, boolean hide) {
         if (date == null) return;
+        int visibility = ClockLabelPlacement.visibility(date);
         if (hide) {
-            if (date.getVisibility() != View.GONE || !originalVisibility.containsKey(date))
-                originalVisibility.put(date, date.getVisibility());
-            if (date.getVisibility() != View.GONE) date.setVisibility(View.GONE);
+            if (visibility != View.GONE || !originalVisibility.containsKey(date))
+                originalVisibility.put(date, visibility);
+            ClockLabelPlacement.setVisibility(date, View.GONE);
         } else {
             Integer original = originalVisibility.remove(date);
-            if (original != null && date.getVisibility() == View.GONE) date.setVisibility(original);
+            if (original != null && visibility == View.GONE)
+                ClockLabelPlacement.setVisibility(date, original);
         }
     }
 

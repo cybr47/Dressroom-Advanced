@@ -86,6 +86,38 @@ public final class ClockLabelScaleTest {
         equal(50, ClockLabelFit.centeredStart(100, 100, 0, 260));
         equal(10, ClockLabelFit.centeredStart(35, 80, 10, 260));
         equal(180, ClockLabelFit.centeredStart(250, 80, 10, 260));
+        detachedBounds();
         System.out.println("Clock label scale and bounds: " + checks + " checks passed");
+    }
+
+    private static void detachedBounds() {
+        ClockLabelPosition.Frame horizontal = new ClockLabelPosition(0, 100, 0)
+                .frame(80, 20, 200, 400, 5);
+        equal(40, horizontal.centerX());
+        equal(390, horizontal.centerY());
+        equal(1, horizontal.scale());
+
+        ClockLabelPosition.Frame snapped = new ClockLabelPosition(2, 99, 90)
+                .frame(80, 20, 200, 400, 5);
+        equal(10, snapped.centerX());
+        equal(360, snapped.centerY());
+        ClockLabelPosition.Frame outsideSnap = new ClockLabelPosition(4, 97, 90)
+                .frame(80, 20, 200, 400, 5);
+        equal(17.2f, outsideSnap.centerX());
+        equal(350.4f, outsideSnap.centerY());
+
+        ClockLabelPosition.Frame rotated = new ClockLabelPosition(100, 0, 45)
+                .frame(80, 20, 200, 400, 5);
+        float rotatedHalf = (float) (50 / Math.sqrt(2));
+        equal(200 - rotatedHalf, rotated.centerX());
+        equal(rotatedHalf, rotated.centerY());
+        ClockLabelPosition.Frame scaled = new ClockLabelPosition(100, 50, 90)
+                .frame(600, 60, 200, 400, 5);
+        equal(2f / 3f, scaled.scale());
+        equal(180, scaled.centerX());
+        equal(200, scaled.centerY());
+        equal(50, ClockLabelPosition.progress(120, 240, 80));
+        check(new ClockLabelPosition(-1, 120, 380).equals(new ClockLabelPosition(0, 100, 360)),
+                "Saved positions stay in the slider range");
     }
 }

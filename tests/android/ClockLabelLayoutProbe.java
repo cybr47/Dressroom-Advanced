@@ -161,6 +161,33 @@ public final class ClockLabelLayoutProbe {
         layout(clock, 0);
         check(clock.getMeasuredHeight() == nativeHeight, "Detached height restores without custom sizes");
 
+        ClockLabelPosition position = new ClockLabelPosition(25, 75, 90);
+        ClockLabelPosition.put(settings, ClockLabelPosition.DATE, position);
+        DateEffects.bindSettings(clock, settings);
+        layout(clock, 0);
+        check(date.getVisibility() == View.GONE && weather.getVisibility() == View.VISIBLE,
+                "The measurement clock excludes only the detached label");
+        check(degrees.getTextSize() == 45, "Attached weather keeps its custom size");
+        ClockLabelPosition.put(settings, ClockLabelPosition.WEATHER, position);
+        DateEffects.bindSettings(clock, settings);
+        layout(clock, 0);
+        org.json.JSONObject profile = new org.json.JSONObject();
+        ClockLabelPosition.save(profile, settings);
+        Bundle stored = new Bundle();
+        ClockLabelPosition.load(profile, stored);
+        check(position.equals(ClockLabelPosition.from(stored, ClockLabelPosition.DATE)),
+                "Date position and rotation survive saving");
+        check(new ClockLabelPosition(25, 75, 0).equals(
+                        ClockLabelPosition.from(stored, ClockLabelPosition.WEATHER)),
+                "Weather saves position without rotation");
+        check(weather.getVisibility() == View.GONE && clock.getMeasuredHeight() == 20,
+                "Detaching both labels leaves the native time height");
+        DateEffects.bindSettings(clock, null);
+        layout(clock, 0);
+        check(date.getVisibility() == View.VISIBLE && weather.getVisibility() == View.VISIBLE,
+                "Clearing positions restores native label visibility");
+        check(clock.getMeasuredHeight() == nativeHeight, "Reattached labels restore native height");
+
         LinearLayout parent = new LinearLayout(context);
         parent.setOrientation(LinearLayout.VERTICAL);
         parent.setGravity(Gravity.CENTER);
@@ -175,13 +202,13 @@ public final class ClockLabelLayoutProbe {
         TextView singleWeather = label(context, "26 degrees", 20);
         singleWeather.setId(WEATHER);
         row.addView(singleWeather, WRAP, WRAP);
-        DateEffects.preview(parent, true, 100, 100, 0f);
+        DateEffects.preview(parent, true, 100, 100, 0f, null, null);
         check(singleDate.getVisibility() == View.GONE, "Hidden date occupies no layout space");
         check((rowParams.gravity & Gravity.VERTICAL_GRAVITY_MASK) == Gravity.CENTER_VERTICAL,
                 "Single-label centering preserves inherited vertical gravity");
         check((row.getGravity() & Gravity.VERTICAL_GRAVITY_MASK) == Gravity.CENTER_VERTICAL,
                 "Single-label content preserves vertical alignment");
-        DateEffects.preview(parent, false, 100, 100, 0f);
+        DateEffects.preview(parent, false, 100, 100, 0f, null, null);
         check(singleDate.getVisibility() == View.VISIBLE, "Showing date restores native visibility");
         check(rowParams.gravity == -1 && row.getGravity() == Gravity.CENTER_VERTICAL,
                 "Showing date restores inherited and content gravity");

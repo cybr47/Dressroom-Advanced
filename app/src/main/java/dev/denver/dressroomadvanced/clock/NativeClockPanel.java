@@ -77,6 +77,9 @@ final class NativeClockPanel {
     private int dateSize = ClockLabelScale.DEFAULT, weatherSize = ClockLabelScale.DEFAULT;
     private int initialDateSize, initialWeatherSize;
     private float labelReference, initialLabelReference;
+    private ClockLabelPosition datePosition, weatherPosition;
+    private ClockLabelPosition initialDatePosition, initialWeatherPosition;
+    private int positionPage;
     private Boolean weatherPreference;
     private boolean initialWeather;
     private boolean forceBlur;
@@ -274,6 +277,10 @@ final class NativeClockPanel {
                 initialLabelReference = labelReference = ClockLabelScale.reference(
                         saved == null ? 0f : saved.getFloat(ClockLabelScale.REFERENCE),
                         dateSize, weatherSize);
+                initialDatePosition = datePosition =
+                        ClockLabelPosition.from(saved, ClockLabelPosition.DATE);
+                initialWeatherPosition = weatherPosition =
+                        ClockLabelPosition.from(saved, ClockLabelPosition.WEATHER);
                 if (saved != null) {
                     forceBlur = binding.early == null && saved.getBoolean("forceBlur")
                             && bool(data, "getBlurEnabled");
@@ -371,6 +378,7 @@ final class NativeClockPanel {
                                 : bool(data, "getShowWeatherInfo");
             }
             if (weatherJob == null) weatherPreference = null;
+            if (datePosition != null || weatherPosition != null) previewDateWeather();
             if (!fontFile.isEmpty()) suppressImportedStretch(data);
             keepShadow(data);
             updateDepthPreview(data);
@@ -666,6 +674,7 @@ final class NativeClockPanel {
                 if (!bool(data, "isWeatherLocationExist"))
                     label("Add a city in Samsung Weather to show weather information.", 12, false);
             }
+            buildLabelPosition(weatherSupported);
             buildStretch(data, font);
             section("Restore");
             TextView reset =
@@ -688,6 +697,8 @@ final class NativeClockPanel {
                             dateSize = initialDateSize;
                             weatherSize = initialWeatherSize;
                             labelReference = initialLabelReference;
+                            datePosition = initialDatePosition;
+                            weatherPosition = initialWeatherPosition;
                             weatherPreference = initialWeather;
                             forceBlur = initialForceBlur;
                             blurRadius = initialBlurRadius;
@@ -1213,7 +1224,7 @@ final class NativeClockPanel {
                     || !expectedScene.equals(module.scene())) {
                 throw new IllegalStateException("Clock changed. Select Advanced again.");
             }
-            if (edits.keySet().stream().allMatch(NativeClockPanel::labelSizeEdit)) {
+            if (edits.keySet().stream().allMatch(NativeClockPanel::labelEdit)) {
                 for (Edit edit : edits.values()) edit.apply(source);
                 stage(source);
                 previewDateWeather();
@@ -1224,7 +1235,7 @@ final class NativeClockPanel {
             NativeEdits.changing(controller, true);
             if (customShadow && shadowValues != null) putShadow(draft, shadowValues);
             for (Edit edit : edits.values()) edit.apply(draft);
-            if (edits.keySet().stream().anyMatch(NativeClockPanel::labelSizeEdit)) previewDateWeather();
+            if (edits.keySet().stream().anyMatch(NativeClockPanel::labelEdit)) previewDateWeather();
             if (edits.keySet().stream().anyMatch(k -> k.startsWith("shadow")))
                 shadowValues = customShadow ? shadowValues(draft) : null;
             stage(draft);
@@ -1346,6 +1357,8 @@ final class NativeClockPanel {
         settings.putInt(ClockLabelScale.DATE, dateSize);
         settings.putInt(ClockLabelScale.WEATHER, weatherSize);
         settings.putFloat(ClockLabelScale.REFERENCE, labelReference);
+        ClockLabelPosition.put(settings, ClockLabelPosition.DATE, datePosition);
+        ClockLabelPosition.put(settings, ClockLabelPosition.WEATHER, weatherPosition);
         settings.putBoolean(
                 "weatherEnabled",
                 weatherJob != null && weatherPreference != null
@@ -1724,12 +1737,107 @@ final class NativeClockPanel {
                 });
     }
 
-    private static boolean labelSizeEdit(String key) {
-        return ClockLabelScale.DATE.equals(key) || ClockLabelScale.WEATHER.equals(key);
+    private void buildLabelPosition(boolean weatherSupported) throws Exception {
+        TextView heading = (TextView) nativeView(EditorBinding.Row.LABEL);
+        heading.setText("Position");
+        PanelRows.heading(heading);
+        addNativeRow(heading);
+
+        LinearLayout parent = currentGroup;
+        if (weatherSupported) {
+            int inset = context.getResources().getDimensionPixelSize(
+                    resource("clock_panel_horizontal_clock_list_horizontal_padding_start", "dimen"));
+            PanelTabs tabs = new PanelTabs(context, new String[] {"Weather", "Date"},
+                    positionPage, inset, selected -> positionPage = selected);
+            parent.addView(tabs.strip());
+            currentGroup = tabs.group(parent, 0);
+            buildLabelPositionControls(true);
+            currentGroup = tabs.group(parent, 1);
+        }
+        buildLabelPositionControls(false);
+        currentGroup = parent;
+    }
+
+    private void buildLabelPositionControls(boolean weather) throws Exception {
+        LinearLayout sliders = new LinearLayout(context);
+        sliders.setOrientation(LinearLayout.VERTICAL);
+        toggle("Detach from clock", labelPosition(weather) != null, true, detached -> {
+            flush();
+            currentRenderer();
+            Object current = data();
+            if (!matchesSelection(current)) return;
+            ClockLabelPosition position = null;
+            if (detached) {
+                position = renderer instanceof View clock
+                        ? ClockLabelPlacement.initialPosition(clock, weather)
+                        : ClockLabelPosition.DEFAULT;
+            }
+            setLabelPosition(weather, position);
+            stage(current);
+            previewDateWeather();
+            // Recalculate the native box only when a label joins or leaves it.
+            NativeEdits.changing(controller, true);
+            try {
+                NativeEdits.remeasure(controller, bool(current, "getShowWeatherInfo"));
+            } finally {
+                finishNativeEdit();
+            }
+            buildPositionSliders(sliders, weather);
+            setStatus("");
+        });
+        currentGroup.addView(sliders, new LinearLayout.LayoutParams(-1, -2));
+        buildPositionSliders(sliders, weather);
+    }
+
+    private void buildPositionSliders(LinearLayout sliders, boolean weather) throws Exception {
+        sliders.removeAllViews();
+        ClockLabelPosition position = labelPosition(weather);
+        if (position == null) return;
+        LinearLayout parent = currentGroup;
+        currentGroup = sliders;
+        String key = weather ? ClockLabelPosition.WEATHER : ClockLabelPosition.DATE;
+        try {
+            slider("Horizontal position", 0, 1, position.x() / 100f, true, 0, false,
+                    value -> edit(key + "X", draft -> {
+                        ClockLabelPosition old = labelPosition(weather);
+                        if (old != null) setLabelPosition(weather,
+                                new ClockLabelPosition(Math.round(value * 100), old.y(), old.rotation()));
+                    }));
+            slider("Vertical position", 0, 1, position.y() / 100f, true, 0, false,
+                    value -> edit(key + "Y", draft -> {
+                        ClockLabelPosition old = labelPosition(weather);
+                        if (old != null) setLabelPosition(weather,
+                                new ClockLabelPosition(old.x(), Math.round(value * 100), old.rotation()));
+                    }));
+            if (!weather) slider("Rotation (°)", 0, 360, position.rotation(), false, 0, false,
+                    value -> edit(key + "Rotation", draft -> {
+                        ClockLabelPosition old = datePosition;
+                        if (old != null) datePosition =
+                                new ClockLabelPosition(old.x(), old.y(), Math.round(value));
+                    }));
+        } finally {
+            currentGroup = parent;
+        }
+    }
+
+    private ClockLabelPosition labelPosition(boolean weather) {
+        return weather ? weatherPosition : datePosition;
+    }
+
+    private void setLabelPosition(boolean weather, ClockLabelPosition position) {
+        if (weather) weatherPosition = position;
+        else datePosition = position;
+    }
+
+    private static boolean labelEdit(String key) {
+        return ClockLabelScale.DATE.equals(key) || ClockLabelScale.WEATHER.equals(key)
+                || key.startsWith(ClockLabelPosition.DATE) || key.startsWith(ClockLabelPosition.WEATHER);
     }
 
     private void previewDateWeather() {
-        if (renderer instanceof View clock) DateEffects.preview(clock, hideDate, dateSize, weatherSize, labelReference);
+        if (renderer instanceof View clock)
+            DateEffects.preview(clock, hideDate, dateSize, weatherSize, labelReference,
+                    datePosition, weatherPosition);
     }
 
     private static String fontPath(Object data) {

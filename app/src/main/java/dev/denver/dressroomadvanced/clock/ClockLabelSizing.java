@@ -39,7 +39,6 @@ final class ClockLabelSizing {
             return;
         }
         profiles.put(clock, new Profile(date, weather, reference));
-        apply(clock);
     }
 
     static void reset() {
@@ -57,7 +56,7 @@ final class ClockLabelSizing {
         restore(clock);
     }
 
-    private static void restore(View clock) {
+    static void restore(View clock) {
         ClockLabelLayout previous = labelLayouts.remove(clock);
         if (previous != null) previous.restore();
     }
@@ -139,7 +138,17 @@ final class ClockLabelSizing {
                 (int) (bounds.width() / bounds.scale()), (int) (bounds.height() / bounds.scale()));
     }
 
-    private static float nativeScale(View clock) {
+    static float detachedFactor(View clock, boolean weather, float nativeScale) {
+        Profile profile = profiles.get(clock);
+        int percent = profile == null ? ClockLabelScale.DEFAULT
+                : weather ? profile.weather() : profile.date();
+        float reference = profile != null ? profile.reference() : 1f;
+        // The detached layer sits outside the clock's View scale.
+        return ClockLabelScale.labelFactor(reference, 1f, nativeScale)
+                * percent / ClockLabelScale.DEFAULT;
+    }
+
+    static float nativeScale(View clock) {
         try {
             Object value = Reflect.call(clock, "getScale");
             if (value instanceof Number scale) return scale.floatValue();

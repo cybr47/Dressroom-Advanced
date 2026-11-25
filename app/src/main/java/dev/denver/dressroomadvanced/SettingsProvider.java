@@ -224,6 +224,7 @@ public final class SettingsProvider extends ContentProvider {
                         ClockLabelScale.reference(extras.getFloat(ClockLabelScale.REFERENCE),
                                 extras.getInt(ClockLabelScale.DATE, ClockLabelScale.DEFAULT),
                                 extras.getInt(ClockLabelScale.WEATHER, ClockLabelScale.DEFAULT)));
+                ClockLabelPosition.save(json, extras);
                 json.put("weatherEnabled", extras.getBoolean("weatherEnabled"));
                 json.put("forceBlur", extras.getBoolean("forceBlur"));
                 json.put("blurRadius", extras.getInt("blurRadius", 200));
@@ -345,6 +346,7 @@ public final class SettingsProvider extends ContentProvider {
             result.putFloat(ClockLabelScale.REFERENCE,
                     ClockLabelScale.reference((float) json.optDouble(ClockLabelScale.REFERENCE, 0),
                             result.getInt(ClockLabelScale.DATE), result.getInt(ClockLabelScale.WEATHER)));
+            ClockLabelPosition.load(json, result);
             if (json.has("weatherEnabled"))
                 result.putBoolean("weatherEnabled", json.getBoolean("weatherEnabled"));
             result.putBoolean("forceBlur", json.optBoolean("forceBlur"));
