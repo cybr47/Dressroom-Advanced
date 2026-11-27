@@ -585,6 +585,12 @@
       "target": "setScaleClock"
     },
     {
+      "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/ClockLabelPlacement.java",
+      "line": 52,
+      "kind": "declared-method",
+      "target": "dispatchTouchEvent"
+    },
+    {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/ClockLabelSizing.java",
       "line": 78,
       "kind": "public-method",
@@ -646,61 +652,61 @@
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 137,
+      "line": 159,
       "kind": "resource",
       "target": "tab_layout"
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 1108,
+      "line": 1137,
       "kind": "class",
       "target": "com.samsung.android.clockpack.plugins.clock.extension."
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 1145,
+      "line": 1174,
       "kind": "class",
       "target": "kotlin.jvm.functions.Function1"
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 1437,
+      "line": 1467,
       "kind": "class",
       "target": "com.samsung.android.clockpack.plugins.clock.ShadowStyle"
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 1472,
+      "line": 1502,
       "kind": "class",
       "target": "com.samsung.android.lockscreen.editor.item.domain.entity.item.clock.ClockDataKt"
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 1475,
+      "line": 1505,
       "kind": "declared-method",
       "target": "deepCopy"
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 1905,
+      "line": 1952,
       "kind": "class",
       "target": "androidx.appcompat.widget.SeslSeekBar$OnSeekBarChangeListener"
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 2006,
+      "line": 2053,
       "kind": "class",
       "target": "androidx.picker3.app.SeslColorPickerDialog$OnColorSetListener"
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 2027,
+      "line": 2074,
       "kind": "class",
       "target": "androidx.picker3.app.SeslColorPickerDialog"
     },
     {
       "file": "app/src/main/java/dev/denver/dressroomadvanced/clock/NativeClockPanel.java",
-      "line": 2036,
+      "line": 2083,
       "kind": "class",
       "target": "androidx.picker3.widget.SeslColorPicker$OnColorChangedListener"
     },

@@ -3,6 +3,7 @@ package dev.denver.dressroomadvanced;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -12,6 +13,7 @@ import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.view.View;
+import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
@@ -33,9 +35,66 @@ final class ClockLabelPlacement {
     private static final Map<View, State> states = new WeakHashMap<>();
     private static final Map<View, Integer> visibility = new WeakHashMap<>();
 
+    private static boolean touchInstalled;
+    private static final Map<View, State> previewHosts = new WeakHashMap<>();
+    interface Editor {
+        boolean active();
+        void selected(boolean weather);
+        void moved(boolean weather, ClockLabelPosition position, boolean finished);
+    }
+
     private ClockLabelPlacement() {}
 
+    // Drawable overlays do not receive touches. Only the matching preview host intercepts boxes.
+    static synchronized void installEditor(DressroomModule module) {
+        if (touchInstalled) return;
+        try {
+            var method = ViewGroup.class.getDeclaredMethod("dispatchTouchEvent", MotionEvent.class);
+            module.hook(method).setId("dressroom-advanced.detached-label-touch")
+                    .intercept(chain -> {
+                        State state = previewHosts.get(chain.getThisObject());
+                        if (state != null && state.touch((MotionEvent) chain.getArg(0))) return true;
+                        return chain.proceed();
+                    });
+            module.deoptimize(method);
+            touchInstalled = true;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
+            module.report("Detached label gestures unavailable", error);
+        }
+    }
+
+    static void editor(View clock, Editor editor, boolean weather) {
+        State state = states.get(clock);
+        if (state != null && state.preview) {
+            state.editor = editor;
+            if (state.host != null) previewHosts.put(state.host, state);
+            state.selectedWeather = weather;
+            state.invalidateSelf();
+        }
+    }
+
+    static void invalidatePreviews() {
+        for (State state : new ArrayList<>(states.values()))
+            if (state.preview) state.invalidateSelf();
+    }
+
+    static ClockLabelPosition splitPosition(View clock, boolean weather, ClockLabelPosition fallback) {
+        State state = states.get(clock);
+        if (state != null && state.grouped && state.host != null) {
+            Box box = weather ? state.weatherBox : state.dateBox;
+            if (box.width > 0 && box.height > 0 && !state.usable.isEmpty())
+                return fallback.moved(box.x-state.usable.left, box.y-state.usable.top,
+                        box.width, box.height, state.usable.width(), state.usable.height());
+        }
+        return new ClockLabelPosition(fallback.x() + (weather ? 10 : -10),
+                fallback.y(), fallback.rotation());
+    }
+
     static void bind(View clock, ClockLabelPosition date, ClockLabelPosition weather, boolean preview) {
+        bind(clock, date, weather, preview, false);
+    }
+
+    static void bind(View clock, ClockLabelPosition date, ClockLabelPosition weather, boolean preview, boolean grouped) {
         State old = states.get(clock);
         if (!preview && old != null && old.preview) return;
         if (date == null && weather == null) {
@@ -50,9 +109,10 @@ final class ClockLabelPlacement {
         }
         if ((old.date == null) != (date == null) || (old.weather == null) != (weather == null))
             ClockLabelSizing.restore(clock);
-        boolean changed = !Objects.equals(old.date, date) || !Objects.equals(old.weather, weather);
+        boolean changed = !Objects.equals(old.date, date) || !Objects.equals(old.weather, weather) || old.grouped != grouped;
         old.date = date;
         old.weather = weather;
+        old.grouped = grouped;
         if (changed) old.invalidateSelf();
     }
 
@@ -135,16 +195,17 @@ final class ClockLabelPlacement {
     }
 
     private static ViewGroup host(View clock, boolean preview) {
+        ViewGroup fallback = null;
         for (View view = clock; view != null;
                 view = view.getParent() instanceof View parent ? parent : null) {
             if (!(view instanceof ViewGroup group)) continue;
             String name = DateEffects.entryName(view);
             if (preview && "preview_single_view_root".equals(name)) return group;
-            if (!preview && ("keyguard_root_view".equals(name)
-                    || view.getClass().getName().equals("com.samsung.android.app.facewidget.SecKeyguardStatusView")))
-                return group;
+            if (!preview && "keyguard_root_view".equals(name)) return group;
+            if (!preview && view.getClass().getName().equals(
+                    "com.samsung.android.app.facewidget.SecKeyguardStatusView")) fallback = group;
         }
-        return null;
+        return fallback;
     }
 
     private static View weatherView(View view) {
@@ -216,7 +277,12 @@ final class ClockLabelPlacement {
         ViewGroup host;
         ViewTreeObserver observer;
         ClockTransitionBinding transition;
-        boolean blocked, drawingDate;
+        boolean blocked, drawingDate, grouped, selectedWeather, dragging;
+        Editor editor;
+        final Box dateBox = new Box(), weatherBox = new Box(), groupBox = new Box();
+        final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int pointer = -1;
+        float grabX, grabY;
         float nativeScale = 1f;
         float opacity, dateScale, weatherScale, hostScale;
 
@@ -257,7 +323,7 @@ final class ClockLabelPlacement {
             drawingDate = !dates.isEmpty();
             boolean drawingWeather = !weatherParts.isEmpty();
             if (host != null) {
-                nativeScale = preview ? 1f : ClockLabelSizing.nativeScale(clock);
+                nativeScale = ClockLabelSizing.nativeScale(clock);
                 dateLabel.bind(dates, false, false);
                 boolean row = !(weatherView instanceof LinearLayout linear)
                         || linear.getOrientation() == LinearLayout.HORIZONTAL;
@@ -297,6 +363,7 @@ final class ClockLabelPlacement {
 
         private void observe(ViewGroup target) {
             host = target;
+            if (preview && editor != null) previewHosts.put(target, this);
             target.getOverlay().add(this);
             observer = target.getViewTreeObserver();
             observer.addOnPreDrawListener(this);
@@ -323,7 +390,12 @@ final class ClockLabelPlacement {
             restoreViews();
             if (observer != null && observer.isAlive()) observer.removeOnPreDrawListener(this);
             observer = null;
-            if (host != null) host.getOverlay().remove(this);
+            if (host != null) {
+                if (previewHosts.get(host) == this) previewHosts.remove(host);
+                host.getOverlay().remove(this);
+            }
+            dragging = false;
+            pointer = -1;
             host = null;
             dateLabel.clear();
             weatherLabel.clear();
@@ -359,6 +431,8 @@ final class ClockLabelPlacement {
             for (View view = clock; view != null && view != host;
                     view = view.getParent() instanceof View parent ? parent : null)
                 nextAlpha *= view.getAlpha();
+            // Normalize the provider zoom equally in preview and runtime.
+            nativeScale = ClockLabelSizing.nativeScale(clock);
             float nextHostScale = hostScale(host);
             float nextDateScale = ClockLabelSizing.detachedFactor(clock, false, nativeScale) * nextHostScale;
             float nextWeatherScale = ClockLabelSizing.detachedFactor(clock, true, nativeScale) * nextHostScale;
@@ -377,24 +451,38 @@ final class ClockLabelPlacement {
         }
 
         @Override public void draw(Canvas canvas) {
+            dateBox.clear(); weatherBox.clear(); groupBox.clear();
             if (host == null || blocked || opacity <= 0) return;
             safeBounds(host, usable);
             if (usable.isEmpty()) return;
             int layer = opacity < 1f
                     ? canvas.saveLayerAlpha(usable, Math.round(opacity * 255)) : canvas.save();
             canvas.clipRect(usable);
-            drawLabel(canvas, dateLabel, date, dateScale, 6 * host.getResources().getDisplayMetrics().density * hostScale);
-            drawLabel(canvas, weatherLabel, weather, weatherScale, 0);
+            float snap = 6 * host.getResources().getDisplayMetrics().density * hostScale;
+            if (grouped) drawGroup(canvas, snap);
+            else {
+                drawLabel(canvas, dateLabel, date, dateScale, snap, dateBox);
+                drawLabel(canvas, weatherLabel, weather, weatherScale, snap, weatherBox);
+            }
             canvas.restoreToCount(layer);
+            if (editing()) {
+                if (grouped) drawBorder(canvas, groupBox, true);
+                else {
+                    drawBorder(canvas, dateBox, !selectedWeather);
+                    drawBorder(canvas, weatherBox, selectedWeather);
+                }
+            }
         }
 
         private void drawLabel(Canvas canvas, Label label, ClockLabelPosition position,
-                               float scale, float snap) {
+                               float scale, float snap, Box box) {
             if (position == null || label.width <= 0 || label.height <= 0 || scale <= 0) return;
             ClockLabelPosition.Frame frame = position.frame(label.width * scale, label.height * scale,
                     usable.width(), usable.height(), snap);
+            box.set(usable.left + frame.centerX(), usable.top + frame.centerY(),
+                    label.width * scale * frame.scale(), label.height * scale * frame.scale(), position.rotation());
             int save = canvas.save();
-            canvas.translate(usable.left + frame.centerX(), usable.top + frame.centerY());
+            canvas.translate(box.x, box.y);
             canvas.rotate(position.rotation());
             canvas.scale(scale * frame.scale(), scale * frame.scale());
             canvas.translate(-label.width / 2f, -label.height / 2f);
@@ -402,9 +490,133 @@ final class ClockLabelPlacement {
             canvas.restoreToCount(save);
         }
 
+        private boolean editing() { return preview && editor != null && editor.active(); }
+
+        private void drawGroup(Canvas canvas, float snap) {
+            ClockLabelPosition position = date != null ? date : weather;
+            if (position == null) return;
+            float dw = dateLabel.width * dateScale, dh = dateLabel.height * dateScale;
+            float ww = weatherLabel.width * weatherScale, wh = weatherLabel.height * weatherScale;
+            float gap = dw > 0 && ww > 0 ? 8 * host.getResources().getDisplayMetrics().density * hostScale : 0;
+            float w = dw + ww + gap, h = Math.max(dh, wh);
+            if (w <= 0 || h <= 0) return;
+            ClockLabelPosition.Frame frame = position.frame(w, h, usable.width(), usable.height(), snap);
+            groupBox.set(usable.left + frame.centerX(), usable.top + frame.centerY(),
+                    w * frame.scale(), h * frame.scale(), position.rotation());
+            int save = canvas.save();
+            canvas.translate(groupBox.x, groupBox.y);
+            canvas.rotate(position.rotation());
+            canvas.scale(frame.scale(), frame.scale());
+            if (dw > 0 && dh > 0) {
+                groupBox.child(dateBox, (-w/2+dw/2)*frame.scale(), dw*frame.scale(), dh*frame.scale());
+                int part = canvas.save();
+                canvas.translate(-w/2, -dh/2);
+                canvas.scale(dateScale, dateScale);
+                dateLabel.draw(canvas);
+                canvas.restoreToCount(part);
+            }
+            if (ww > 0 && wh > 0) {
+                groupBox.child(weatherBox, (w/2-ww/2)*frame.scale(), ww*frame.scale(), wh*frame.scale());
+                int part = canvas.save();
+                canvas.translate(w/2-ww, -wh/2);
+                canvas.scale(weatherScale, weatherScale);
+                weatherLabel.draw(canvas);
+                canvas.restoreToCount(part);
+            }
+            canvas.restoreToCount(save);
+        }
+
+        private void drawBorder(Canvas canvas, Box box, boolean selected) {
+            if (box.width <= 0 || box.height <= 0) return;
+            float dp = host.getResources().getDisplayMetrics().density * hostScale;
+            int save = canvas.save();
+            canvas.translate(box.x, box.y);
+            canvas.rotate(box.rotation);
+            border.setStyle(Paint.Style.STROKE);
+            border.setStrokeWidth((selected ? 2 : 1) * dp);
+            border.setColor(selected ? 0xffffffff : 0x88ffffff);
+            float pad = 4 * dp;
+            canvas.drawRoundRect(-box.width/2-pad, -box.height/2-pad,
+                    box.width/2+pad, box.height/2+pad, 6*dp, 6*dp, border);
+            canvas.restoreToCount(save);
+        }
+
+        boolean touch(MotionEvent event) {
+            int action = event.getActionMasked();
+            if (!editing() || blocked || opacity <= 0) {
+                if (dragging) { dragging = false; pointer = -1; return true; }
+                return false;
+            }
+            if (action == MotionEvent.ACTION_DOWN) {
+                float x = event.getX(), y = event.getY();
+                float pad = 12 * host.getResources().getDisplayMetrics().density * hostScale;
+                boolean hitDate = dateBox.contains(x, y, pad), hitWeather = weatherBox.contains(x, y, pad);
+                if (grouped ? !groupBox.contains(x, y, pad) : !hitDate && !hitWeather) return false;
+                selectedWeather = !grouped && hitWeather && (!hitDate || selectedWeather);
+                Box box = grouped ? groupBox : selectedWeather ? weatherBox : dateBox;
+                grabX = x-box.x; grabY = y-box.y;
+                pointer = event.getPointerId(0);
+                dragging = true;
+                boolean selected = selectedWeather;
+                editor.selected(selected);
+                selectedWeather = selected;
+                invalidateSelf();
+                return true;
+            }
+            if (!dragging) return false;
+            int index = event.findPointerIndex(pointer);
+            boolean finished = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL
+                    || (action == MotionEvent.ACTION_POINTER_UP
+                    && event.getPointerId(event.getActionIndex()) == pointer);
+            if (index >= 0 && (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP)) {
+                Box box = grouped ? groupBox : selectedWeather ? weatherBox : dateBox;
+                ClockLabelPosition old = selectedWeather ? weather : date;
+                if (old == null) old = weather;
+                if (old != null && box.width > 0 && box.height > 0) {
+                    ClockLabelPosition next = old.moved(event.getX(index)-grabX-usable.left,
+                            event.getY(index)-grabY-usable.top, box.width, box.height, usable.width(), usable.height());
+                    if (grouped) date = weather = next;
+                    else if (selectedWeather) weather = next;
+                    else date = next;
+                    editor.moved(selectedWeather, next, finished);
+                    invalidateSelf();
+                }
+            }
+            if (finished) {
+                ClockLabelPosition current = selectedWeather ? weather : date;
+                if (current == null) current = weather;
+                if (current != null && action != MotionEvent.ACTION_UP)
+                    editor.moved(selectedWeather, current, true);
+                dragging = false;
+                pointer = -1;
+            }
+            return true;
+        }
+
         @Override public void setAlpha(int alpha) {}
         @Override public void setColorFilter(ColorFilter filter) {}
         @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
+    }
+
+    // Drawing, hit testing and movement share the same rotated geometry.
+    private static final class Box {
+        float x, y, width, height;
+        int rotation;
+        void clear() { width = height = 0; }
+        void set(float x, float y, float width, float height, int rotation) {
+            this.x=x; this.y=y; this.width=width; this.height=height; this.rotation=rotation;
+        }
+        void child(Box target, float dx, float w, float h) {
+            double a = Math.toRadians(rotation);
+            target.set(x+dx*(float)Math.cos(a), y+dx*(float)Math.sin(a), w, h, rotation);
+        }
+        boolean contains(float px, float py, float pad) {
+            if (width <= 0 || height <= 0) return false;
+            double a = Math.toRadians(rotation);
+            float dx=px-x, dy=py-y;
+            return Math.abs(dx*Math.cos(a)+dy*Math.sin(a)) <= width/2+pad
+                    && Math.abs(-dx*Math.sin(a)+dy*Math.cos(a)) <= height/2+pad;
+        }
     }
 
     private static final class Label {

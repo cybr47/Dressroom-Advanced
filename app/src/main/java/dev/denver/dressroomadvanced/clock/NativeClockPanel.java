@@ -79,7 +79,28 @@ final class NativeClockPanel {
     private float labelReference, initialLabelReference;
     private ClockLabelPosition datePosition, weatherPosition;
     private ClockLabelPosition initialDatePosition, initialWeatherPosition;
-    private int positionPage;
+    private boolean labelsGrouped, initialLabelsGrouped, selectedWeather;
+    private LinearLayout positionControls, rotationControls;
+    private final ClockLabelPlacement.Editor labelEditor = new ClockLabelPlacement.Editor() {
+        public boolean active() {
+            return ready && advanced != null && advanced.isShown()
+                    && positionControls != null && positionControls.isShown();
+        }
+        public void selected(boolean weather) {
+            flush();
+            selectedWeather = weather;
+            try { buildRotationControl(); } catch (Exception e) { error(e); }
+        }
+        public void moved(boolean weather, ClockLabelPosition position, boolean finished) {
+            setLabelPosition(weather, position);
+            if (finished) {
+                try {
+                    Object current = data();
+                    if (matchesSelection(current)) stage(current);
+                } catch (Exception e) { error(e); }
+            }
+        }
+    };
     private Boolean weatherPreference;
     private boolean initialWeather;
     private boolean forceBlur;
@@ -132,6 +153,7 @@ final class NativeClockPanel {
 
     private void install() throws ReflectiveOperationException {
         module.registerPanel(this);
+        ClockLabelPlacement.installEditor(module);
         int id =
                 context.getResources()
                         .getIdentifier("tab_layout", "id", "com.samsung.android.app.dressroom");
@@ -170,7 +192,10 @@ final class NativeClockPanel {
                         new String[] {"Layout", "Effects", "Depth", "Date"},
                         0,
                         tabInset,
-                        page -> scroll.post(() -> scroll.scrollTo(0, 0)));
+                        page -> {
+                            ClockLabelPlacement.invalidatePreviews();
+                            scroll.post(() -> scroll.scrollTo(0, 0));
+                        });
         advanced.addView(pages.strip());
         scroll.setVisibility(View.VISIBLE);
         advanced.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -189,6 +214,7 @@ final class NativeClockPanel {
                                 this.advanced.setVisibility(advanced ? View.VISIBLE : View.GONE);
                                 if (advanced) refresh();
                                 else flush();
+                                ClockLabelPlacement.invalidatePreviews();
                                 root.requestLayout();
                             }
                             return null;
@@ -281,6 +307,8 @@ final class NativeClockPanel {
                         ClockLabelPosition.from(saved, ClockLabelPosition.DATE);
                 initialWeatherPosition = weatherPosition =
                         ClockLabelPosition.from(saved, ClockLabelPosition.WEATHER);
+                initialLabelsGrouped = labelsGrouped = saved != null && saved.getBoolean(ClockLabelPosition.GROUPED);
+                selectedWeather = datePosition == null && weatherPosition != null;
                 if (saved != null) {
                     forceBlur = binding.early == null && saved.getBoolean("forceBlur")
                             && bool(data, "getBlurEnabled");
@@ -699,6 +727,7 @@ final class NativeClockPanel {
                             labelReference = initialLabelReference;
                             datePosition = initialDatePosition;
                             weatherPosition = initialWeatherPosition;
+                            labelsGrouped = initialLabelsGrouped;
                             weatherPreference = initialWeather;
                             forceBlur = initialForceBlur;
                             blurRadius = initialBlurRadius;
@@ -1359,6 +1388,7 @@ final class NativeClockPanel {
         settings.putFloat(ClockLabelScale.REFERENCE, labelReference);
         ClockLabelPosition.put(settings, ClockLabelPosition.DATE, datePosition);
         ClockLabelPosition.put(settings, ClockLabelPosition.WEATHER, weatherPosition);
+        settings.putBoolean(ClockLabelPosition.GROUPED, labelsGrouped);
         settings.putBoolean(
                 "weatherEnabled",
                 weatherJob != null && weatherPreference != null
@@ -1742,90 +1772,105 @@ final class NativeClockPanel {
         heading.setText("Position");
         PanelRows.heading(heading);
         addNativeRow(heading);
+        positionControls = new LinearLayout(context);
+        positionControls.setOrientation(LinearLayout.VERTICAL);
+        currentGroup.addView(positionControls, new LinearLayout.LayoutParams(-1, -2));
+        buildPositionControls(weatherSupported);
+    }
 
+    private void buildPositionControls(boolean weatherSupported) throws Exception {
+        positionControls.removeAllViews();
         LinearLayout parent = currentGroup;
-        if (weatherSupported) {
-            int inset = context.getResources().getDimensionPixelSize(
-                    resource("clock_panel_horizontal_clock_list_horizontal_padding_start", "dimen"));
-            PanelTabs tabs = new PanelTabs(context, new String[] {"Weather", "Date"},
-                    positionPage, inset, selected -> positionPage = selected);
-            parent.addView(tabs.strip());
-            currentGroup = tabs.group(parent, 0);
-            buildLabelPositionControls(true);
-            currentGroup = tabs.group(parent, 1);
-        }
-        buildLabelPositionControls(false);
-        currentGroup = parent;
+        currentGroup = positionControls;
+        try {
+            boolean detached = datePosition != null || weatherPosition != null;
+            toggle("Detach date and weather", detached, true, enabled -> {
+                flush();
+                currentRenderer();
+                Object current = data();
+                if (!matchesSelection(current)) return;
+                if (enabled) {
+                    ClockLabelPosition d = renderer instanceof View clock
+                            ? ClockLabelPlacement.initialPosition(clock, false) : ClockLabelPosition.DEFAULT;
+                    ClockLabelPosition w = renderer instanceof View clock && weatherSupported
+                            ? ClockLabelPlacement.initialPosition(clock, true) : d;
+                    datePosition = weatherPosition = new ClockLabelPosition(
+                            (d.x()+w.x())/2, (d.y()+w.y())/2, 0);
+                    labelsGrouped = true;
+                    selectedWeather = false;
+                    if (labelReference == 0f)
+                        labelReference = ClockLabelScale.zoom(number(current, "getScale").floatValue());
+                } else {
+                    datePosition = weatherPosition = null;
+                    labelsGrouped = false;
+                }
+                stage(current);
+                previewDateWeather();
+                NativeEdits.changing(controller, true);
+                try {
+                    NativeEdits.remeasure(controller, bool(current, "getShowWeatherInfo"));
+                } finally { finishNativeEdit(); }
+                buildPositionControls(weatherSupported);
+                setStatus("");
+            });
+            if (!detached) return;
+            if (!labelsGrouped && datePosition == null) selectedWeather = true;
+            if (!labelsGrouped && weatherPosition == null) selectedWeather = false;
+            if (weatherSupported) toggle("Separate date and weather", !labelsGrouped, true, split -> {
+                flush();
+                currentRenderer();
+                Object current = data();
+                if (!matchesSelection(current)) return;
+                ClockLabelPosition d = datePosition != null ? datePosition : weatherPosition;
+                ClockLabelPosition w = weatherPosition != null ? weatherPosition : d;
+                if (split && labelsGrouped && renderer instanceof View clock) {
+                    datePosition = ClockLabelPlacement.splitPosition(clock, false, d);
+                    weatherPosition = ClockLabelPlacement.splitPosition(clock, true, d);
+                } else if (!split) {
+                    datePosition = weatherPosition = new ClockLabelPosition(
+                            (d.x()+w.x())/2, (d.y()+w.y())/2, d.rotation());
+                }
+                labelsGrouped = !split;
+                selectedWeather = false;
+                stage(current);
+                previewDateWeather();
+                buildPositionControls(weatherSupported);
+            });
+            label("Tap a box to select it. Drag to move.", 12, false);
+            rotationControls = new LinearLayout(context);
+            rotationControls.setOrientation(LinearLayout.VERTICAL);
+            currentGroup.addView(rotationControls, new LinearLayout.LayoutParams(-1, -2));
+            buildRotationControl();
+        } finally { currentGroup = parent; }
     }
 
-    private void buildLabelPositionControls(boolean weather) throws Exception {
-        LinearLayout sliders = new LinearLayout(context);
-        sliders.setOrientation(LinearLayout.VERTICAL);
-        toggle("Detach from clock", labelPosition(weather) != null, true, detached -> {
-            flush();
-            currentRenderer();
-            Object current = data();
-            if (!matchesSelection(current)) return;
-            ClockLabelPosition position = null;
-            if (detached) {
-                position = renderer instanceof View clock
-                        ? ClockLabelPlacement.initialPosition(clock, weather)
-                        : ClockLabelPosition.DEFAULT;
-            }
-            setLabelPosition(weather, position);
-            stage(current);
-            previewDateWeather();
-            // Recalculate the native box only when a label joins or leaves it.
-            NativeEdits.changing(controller, true);
-            try {
-                NativeEdits.remeasure(controller, bool(current, "getShowWeatherInfo"));
-            } finally {
-                finishNativeEdit();
-            }
-            buildPositionSliders(sliders, weather);
-            setStatus("");
-        });
-        currentGroup.addView(sliders, new LinearLayout.LayoutParams(-1, -2));
-        buildPositionSliders(sliders, weather);
-    }
-
-    private void buildPositionSliders(LinearLayout sliders, boolean weather) throws Exception {
-        sliders.removeAllViews();
-        ClockLabelPosition position = labelPosition(weather);
+    private void buildRotationControl() throws Exception {
+        if (rotationControls == null) return;
+        rotationControls.removeAllViews();
+        ClockLabelPosition position = labelPosition(selectedWeather);
         if (position == null) return;
         LinearLayout parent = currentGroup;
-        currentGroup = sliders;
-        String key = weather ? ClockLabelPosition.WEATHER : ClockLabelPosition.DATE;
+        currentGroup = rotationControls;
         try {
-            slider("Horizontal position", 0, 1, position.x() / 100f, true, 0, false,
-                    value -> edit(key + "X", draft -> {
+            boolean weather = selectedWeather;
+            String title = labelsGrouped ? "Rotation (°)" : weather ? "Weather rotation (°)" : "Date rotation (°)";
+            slider(title, 0, 360, position.rotation(), false, 0, false,
+                    value -> edit(ClockLabelPosition.DATE + "Rotation", draft -> {
                         ClockLabelPosition old = labelPosition(weather);
                         if (old != null) setLabelPosition(weather,
-                                new ClockLabelPosition(Math.round(value * 100), old.y(), old.rotation()));
+                                new ClockLabelPosition(old.x(), old.y(), Math.round(value)));
                     }));
-            slider("Vertical position", 0, 1, position.y() / 100f, true, 0, false,
-                    value -> edit(key + "Y", draft -> {
-                        ClockLabelPosition old = labelPosition(weather);
-                        if (old != null) setLabelPosition(weather,
-                                new ClockLabelPosition(old.x(), Math.round(value * 100), old.rotation()));
-                    }));
-            if (!weather) slider("Rotation (°)", 0, 360, position.rotation(), false, 0, false,
-                    value -> edit(key + "Rotation", draft -> {
-                        ClockLabelPosition old = datePosition;
-                        if (old != null) datePosition =
-                                new ClockLabelPosition(old.x(), old.y(), Math.round(value));
-                    }));
-        } finally {
-            currentGroup = parent;
-        }
+        } finally { currentGroup = parent; }
     }
 
     private ClockLabelPosition labelPosition(boolean weather) {
+        if (labelsGrouped) return datePosition != null ? datePosition : weatherPosition;
         return weather ? weatherPosition : datePosition;
     }
 
     private void setLabelPosition(boolean weather, ClockLabelPosition position) {
-        if (weather) weatherPosition = position;
+        if (labelsGrouped) datePosition = weatherPosition = position;
+        else if (weather) weatherPosition = position;
         else datePosition = position;
     }
 
@@ -1835,9 +1880,11 @@ final class NativeClockPanel {
     }
 
     private void previewDateWeather() {
-        if (renderer instanceof View clock)
+        if (renderer instanceof View clock) {
             DateEffects.preview(clock, hideDate, dateSize, weatherSize, labelReference,
-                    datePosition, weatherPosition);
+                    datePosition, weatherPosition, labelsGrouped);
+            ClockLabelPlacement.editor(clock, labelEditor, selectedWeather);
+        }
     }
 
     private static String fontPath(Object data) {

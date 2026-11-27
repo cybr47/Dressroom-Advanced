@@ -138,9 +138,15 @@ final class DateEffects {
 
     static void preview(View clock, boolean hide, int date, int weather, float reference,
                         ClockLabelPosition datePosition, ClockLabelPosition weatherPosition) {
+        preview(clock, hide, date, weather, reference, datePosition, weatherPosition, false);
+    }
+
+    static void preview(View clock, boolean hide, int date, int weather, float reference,
+                        ClockLabelPosition datePosition, ClockLabelPosition weatherPosition,
+                        boolean grouped) {
         previews.put(clock, hide);
-        ClockLabelPlacement.bind(clock, datePosition, weatherPosition, true);
         ClockLabelSizing.bind(clock, date, weather, reference);
+        ClockLabelPlacement.bind(clock, datePosition, weatherPosition, true, grouped);
         apply(clock);
     }
 
@@ -161,7 +167,8 @@ final class DateEffects {
 
     private static void bindPositions(View clock, Bundle settings, boolean preview) {
         ClockLabelPlacement.bind(clock, ClockLabelPosition.from(settings, ClockLabelPosition.DATE),
-                ClockLabelPosition.from(settings, ClockLabelPosition.WEATHER), preview);
+                ClockLabelPosition.from(settings, ClockLabelPosition.WEATHER), preview,
+                settings != null && settings.getBoolean(ClockLabelPosition.GROUPED));
     }
 
     static boolean hideDate(View clock) {

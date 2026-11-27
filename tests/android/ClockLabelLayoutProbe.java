@@ -172,14 +172,16 @@ public final class ClockLabelLayoutProbe {
         DateEffects.bindSettings(clock, settings);
         layout(clock, 0);
         org.json.JSONObject profile = new org.json.JSONObject();
+        settings.putBoolean(ClockLabelPosition.GROUPED, true);
         ClockLabelPosition.save(profile, settings);
         Bundle stored = new Bundle();
         ClockLabelPosition.load(profile, stored);
+        check(stored.getBoolean(ClockLabelPosition.GROUPED), "Grouped mode survives saving");
         check(position.equals(ClockLabelPosition.from(stored, ClockLabelPosition.DATE)),
                 "Date position and rotation survive saving");
-        check(new ClockLabelPosition(25, 75, 0).equals(
+        check(position.equals(
                         ClockLabelPosition.from(stored, ClockLabelPosition.WEATHER)),
-                "Weather saves position without rotation");
+                "Weather saves position and rotation");
         check(weather.getVisibility() == View.GONE && clock.getMeasuredHeight() == 20,
                 "Detaching both labels leaves the native time height");
         DateEffects.bindSettings(clock, null);

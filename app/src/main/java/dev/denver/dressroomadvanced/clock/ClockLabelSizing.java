@@ -142,7 +142,7 @@ final class ClockLabelSizing {
         Profile profile = profiles.get(clock);
         int percent = profile == null ? ClockLabelScale.DEFAULT
                 : weather ? profile.weather() : profile.date();
-        float reference = profile != null ? profile.reference() : 1f;
+        float reference = profile != null ? ClockLabelScale.zoom(profile.reference()) : 1f;
         // The detached layer sits outside the clock's View scale.
         return ClockLabelScale.labelFactor(reference, 1f, nativeScale)
                 * percent / ClockLabelScale.DEFAULT;

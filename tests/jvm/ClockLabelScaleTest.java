@@ -87,6 +87,9 @@ public final class ClockLabelScaleTest {
         equal(10, ClockLabelFit.centeredStart(35, 80, 10, 260));
         equal(180, ClockLabelFit.centeredStart(250, 80, 10, 260));
         detachedBounds();
+        ClockLabelPosition dragged = new ClockLabelPosition(50, 50, 90).moved(10, 360, 80, 20, 200, 400);
+        check(dragged.equals(new ClockLabelPosition(0, 100, 90)), "Rotated drag uses visible edges");
+        equal(100, new ClockLabelPosition(49, 50, 0).frame(80, 20, 200, 400, 5).centerX());
         System.out.println("Clock label scale and bounds: " + checks + " checks passed");
     }
 
