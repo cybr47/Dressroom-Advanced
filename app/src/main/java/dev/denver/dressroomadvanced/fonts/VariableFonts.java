@@ -139,6 +139,7 @@ public final class VariableFonts {
                                                                     replacement, chain.getArg(1)
                                                                 });
                                                 ensureTypeface(views, replacement);
+                                                ColonAlignmentFix.watch(clock, !imported.isEmpty());
                                                 applied.put(clock, profileKey(settings));
                                                 return result;
                                             })
@@ -171,6 +172,7 @@ public final class VariableFonts {
                                                             remember(clock, views);
                                                             apply.invoke(clock, replacement, views);
                                                             ensureTypeface(views, replacement);
+                                                            ColonAlignmentFix.watch(clock, true);
                                                             applied.put(
                                                                     clock, profileKey(settings));
                                                             return null;
@@ -238,8 +240,10 @@ public final class VariableFonts {
     static void configure(View clock, Bundle settings) {
         if (settings == null) configured.remove(clock);
         else configured.put(clock, settings);
-        if (fileId(settings).isEmpty()) importedClocks.remove(clock);
-        else importedClocks.put(clock, true);
+        if (fileId(settings).isEmpty()) {
+            importedClocks.remove(clock);
+            ColonAlignmentFix.watch(clock, false);
+        } else importedClocks.put(clock, true);
     }
 
     private static Bundle settings(View clock, Profile fallback) {
@@ -429,6 +433,7 @@ public final class VariableFonts {
                 FontBinding.of(clock).apply(clock, replacement, views);
                 ensureTypeface(views, replacement);
             }
+            ColonAlignmentFix.watch(clock, !fileId(settings).isEmpty());
             applied.put(clock, profileKey(settings));
             clock.requestLayout();
             clock.invalidate();
@@ -475,6 +480,7 @@ public final class VariableFonts {
         if (clock != null) {
             applied.remove(clock);
             targets.remove(clock);
+            ColonAlignmentFix.watch(clock, false);
         }
     }
 
